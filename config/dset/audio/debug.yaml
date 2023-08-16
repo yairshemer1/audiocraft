@@ -1,0 +1,13 @@
+# @package __global__
+
+# WARNING: This is a base configuration file shared across ALL solvers in AudioCraft
+# Please don't update this file directly. Instead use distinct configuration files
+# to override the below configuration.
+datasource:
+  max_sample_rate: 44100
+  max_channels: 2
+
+  train: /cs/usr/yair.shemer/AudioLab/audiocraft/egs/debug/tr/data.jsonl
+  valid: /cs/usr/yair.shemer/AudioLab/audiocraft/egs/debug/cv/data.jsonl
+  evaluate: /cs/usr/yair.shemer/AudioLab/audiocraft/egs/debug/tt/data.jsonl
+  generate: /cs/usr/yair.shemer/AudioLab/audiocraft/egs/debug/cv/data.jsonl

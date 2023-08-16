@@ -28,6 +28,7 @@ wheels/
 .installed.cfg
 *.egg
 .ipynb_checkpoints
+.idea
 
 # Tests and linter
 .pytest_cache/
@@ -47,11 +48,7 @@ venv/
 ENV/
 
 # egs with manifest files
-egs/*
-!egs/example
-# local datasets
-dataset/*
-!dataset/example
+egs/
 
 # personal notebooks & scripts
 */local_scripts

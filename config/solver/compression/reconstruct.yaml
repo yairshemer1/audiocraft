@@ -3,11 +3,12 @@
 defaults:
   - compression/default
   - /model: encodec/encodec_large_nq4_s320
-  - override /dset: audio/debug
+  - override /dset: audio/valentini
   - _self_
 
 channels: 1
 sample_rate: 16000
+
 
 logging:
   level: INFO
@@ -20,23 +21,25 @@ wandb:
   name:  # optional name for the experiment
   group:  # optional group
 
-
-# very small dataset
 dataset:
-  batch_size: 1
+  batch_size: 32
   num_workers: 10
   segment_duration: 1
   valid:
-    num_samples: 10
+    batch_size: 32
+    num_samples: 768
+  evaluate:
+    batch_size: 32
+    num_samples: 824
   generate:
-    num_samples: 2
+    batch_size: 32
+    num_samples: 10
     segment_duration: 2
 
-# limited training
 evaluate:
-  every: 1
+  every: 10
 generate:
-  every: 1
+  every: 10
 optim:
-  epochs: 10
-  updates_per_epoch: 1000
+  epochs: 500
+  updates_per_epoch: 400
