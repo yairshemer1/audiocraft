@@ -2,7 +2,7 @@
 
 defaults:
   - compression/default
-  - /model: encodec/encodec_large_nq4_s320
+  - /model: encodec/complex_encodec
   - override /dset: audio/valentini
   - _self_
 

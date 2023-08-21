@@ -88,6 +88,7 @@ class CompressionSolver(base.StandardSolver):
         qres = self.model(x)
         assert isinstance(qres, quantization.QuantizedResult)
         y_pred = qres.x
+        y = y[..., :y_pred.shape[-1]]  # trim to match y_pred
         # Log bandwidth in kb/s
         metrics['bandwidth'] = qres.bandwidth.mean()
 
@@ -200,6 +201,7 @@ class CompressionSolver(base.StandardSolver):
 
                 y_pred = qres.x.cpu()
                 y = batch.cpu()  # should already be on CPU but just in case
+                y = y[..., :y_pred.shape[-1]]  # trim to same length
                 pendings.append(pool.submit(evaluate_audio_reconstruction, y_pred, y, self.cfg))
 
             metrics_lp = self.log_progress(f'{evaluate_stage_name} metrics', pendings, updates=self.log_updates)

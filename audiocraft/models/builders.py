@@ -16,6 +16,7 @@ import omegaconf
 import torch
 
 from .encodec import CompressionModel, EncodecModel
+from .complex_encodec import ComplexEncodecModel
 from .lm import LMModel
 from ..modules.codebooks_patterns import (
     CodebooksPatternProvider,
@@ -58,8 +59,8 @@ def get_encodec_autoencoder(encoder_name: str, cfg: omegaconf.DictConfig):
         decoder_override_kwargs = kwargs.pop('decoder')
         encoder_kwargs = {**kwargs, **encoder_override_kwargs}
         decoder_kwargs = {**kwargs, **decoder_override_kwargs}
-        encoder = audiocraft.modules.SEANetEncoder(**encoder_kwargs)
-        decoder = audiocraft.modules.SEANetDecoder(**decoder_kwargs)
+        encoder = audiocraft.modules.SEANetEncoder2d(**encoder_kwargs)
+        decoder = audiocraft.modules.SEANetDecoder2d(**decoder_kwargs)
         return encoder, decoder
     else:
         raise KeyError(f"Unexpected compression model {cfg.compression_model}")
@@ -77,7 +78,7 @@ def get_compression_model(cfg: omegaconf.DictConfig) -> CompressionModel:
         renormalize = kwargs.pop('renormalize', False)
         # deprecated params
         kwargs.pop('renorm', None)
-        return EncodecModel(encoder, decoder, quantizer,
+        return ComplexEncodecModel(encoder, decoder, quantizer,
                             frame_rate=frame_rate, renormalize=renormalize, **kwargs).to(cfg.device)
     else:
         raise KeyError(f"Unexpected compression model {cfg.compression_model}")
