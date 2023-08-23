@@ -3,6 +3,9 @@
 defaults:
   - encodec/default
 
+encodec:
+  is_complex: true
+
 seanet:
   n_filters: 64
   ratios: [2, 4, 4, 4]
