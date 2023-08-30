@@ -6,6 +6,8 @@ defaults:
   - override /dset: audio/debug
   - _self_
 
+solver: complex_compression
+
 channels: 1
 sample_rate: 16000
 
