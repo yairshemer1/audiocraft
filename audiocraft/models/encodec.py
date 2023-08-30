@@ -30,7 +30,7 @@ class CompressionModel(ABC, nn.Module):
     """
 
     @abstractmethod
-    def forward(self, x: torch.Tensor) -> qt.QuantizedResult:
+    def forward(self, x: torch.Tensor, **kwargs) -> qt.QuantizedResult:
         ...
 
     @abstractmethod
@@ -202,7 +202,7 @@ class EncodecModel(CompressionModel):
             x = x * scale.view(-1, 1, 1)
         return x
 
-    def forward(self, x: torch.Tensor) -> qt.QuantizedResult:
+    def forward(self, x: torch.Tensor, **kwargs) -> qt.QuantizedResult:
         assert x.dim() == 3
         length = x.shape[-1]
         x, scale = self.preprocess(x)
@@ -270,7 +270,7 @@ class DAC(CompressionModel):
         self.n_quantizers = self.total_codebooks
         self.model.eval()
 
-    def forward(self, x: torch.Tensor) -> qt.QuantizedResult:
+    def forward(self, x: torch.Tensor, **kwargs) -> qt.QuantizedResult:
         # We don't support training with this.
         raise NotImplementedError("Forward and training with DAC not supported.")
 
@@ -336,7 +336,7 @@ class HFEncodecCompressionModel(CompressionModel):
         self.possible_num_codebooks = [int(nc) for nc in num_codebooks]
         self.set_num_codebooks(max(self.possible_num_codebooks))
 
-    def forward(self, x: torch.Tensor) -> qt.QuantizedResult:
+    def forward(self, x: torch.Tensor, **kwargs) -> qt.QuantizedResult:
         # We don't support training with this.
         raise NotImplementedError("Forward and training with HF EncodecModel not supported.")
 

@@ -80,15 +80,19 @@ class CompressionSolver(base.StandardSolver):
         self.logger.info("Info losses:")
         self.logger.info(self.info_losses)
 
-    def run_step(self, idx: int, batch: torch.Tensor, metrics: dict):
-        """Perform one training or valid step on a given batch."""
-        x = batch.to(self.device)
+    def run_model(self, x) -> [torch.Tensor, torch.Tensor, quantization.QuantizedResult]:
         y = x.clone()
 
         qres = self.model(x)
         assert isinstance(qres, quantization.QuantizedResult)
         y_pred = qres.x
-        y = y[..., :y_pred.shape[-1]]  # trim to match y_pred
+        return y, y_pred, qres
+
+    def run_step(self, idx: int, batch: torch.Tensor, metrics: dict):
+        """Perform one training or valid step on a given batch."""
+        x = batch.to(self.device)
+
+        y, y_pred, qres = self.run_model(x)
         # Log bandwidth in kb/s
         metrics['bandwidth'] = qres.bandwidth.mean()
 
@@ -197,11 +201,10 @@ class CompressionSolver(base.StandardSolver):
             for idx, batch in enumerate(lp):
                 x = batch.to(self.device)
                 with torch.no_grad():
-                    qres = self.model(x)
+                    y, y_pred, _ = self.run_model(x)
 
-                y_pred = qres.x.cpu()
-                y = batch.cpu()  # should already be on CPU but just in case
-                y = y[..., :y_pred.shape[-1]]  # trim to same length
+                y_pred = y_pred.cpu()
+                y = y.cpu()  # should already be on CPU but just in case
                 pendings.append(pool.submit(evaluate_audio_reconstruction, y_pred, y, self.cfg))
 
             metrics_lp = self.log_progress(f'{evaluate_stage_name} metrics', pendings, updates=self.log_updates)
@@ -226,7 +229,7 @@ class CompressionSolver(base.StandardSolver):
             reference, _ = batch
             reference = reference.to(self.device)
             with torch.no_grad():
-                qres = self.model(reference)
+                _, _, qres = self.run_model(reference)
             assert isinstance(qres, quantization.QuantizedResult)
 
             reference = reference.cpu()
