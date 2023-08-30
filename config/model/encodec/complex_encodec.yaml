@@ -5,6 +5,7 @@ defaults:
 
 encodec:
   is_complex: true
+  super_res_prob: 0.5
 
 seanet:
   n_filters: 64
