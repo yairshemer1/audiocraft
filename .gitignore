@@ -58,3 +58,5 @@ egs/
 /local_scripts
 /notes
 /slurm_logs
+runner*.sh
+
