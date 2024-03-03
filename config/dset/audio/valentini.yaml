@@ -10,4 +10,4 @@ datasource:
   train: /cs/usr/yair.shemer/AudioLab/audiocraft/egs/valentini/tr/data.jsonl
   valid: /cs/usr/yair.shemer/AudioLab/audiocraft/egs/valentini/cv/data.jsonl
   evaluate: /cs/usr/yair.shemer/AudioLab/audiocraft/egs/valentini/tt/data.jsonl
-  generate: /cs/usr/yair.shemer/AudioLab/audiocraft/egs/valentini/cv/data.jsonl
+  generate: /cs/usr/yair.shemer/AudioLab/audiocraft/egs/valentini/tt/data.jsonl
