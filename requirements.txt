@@ -21,3 +21,7 @@ gradio
 torchmetrics
 encodec
 protobuf
+dora-search
+wandb
+pesq
+ipdb

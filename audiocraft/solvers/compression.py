@@ -220,6 +220,9 @@ class CompressionSolver(base.StandardSolver):
 
     def generate(self):
         """Generate stage."""
+        if not self.cfg.logging.log_wandb:
+            logger.info("No generate without wandb.")
+            return
         self.model.eval()
         sample_manager = SampleManager(self.xp, map_reference_to_sample_id=True)
         generate_stage_name = str(self.current_stage)
@@ -251,16 +254,16 @@ class CompressionSolver(base.StandardSolver):
                     row = [sample_id]
 
                     soundfile.write(file=f"{temp_dir}/{sample_id}_ref.wav",
-                                    data=reference[sample_idx].flatten(),
+                                    data=reference[sample_idx].squeeze(),
                                     samplerate=self.cfg.model_conditions.super_res.origin_sr)
                     soundfile.write(file=f"{temp_dir}/{sample_id}_ref_downsample.wav",
-                                    data=reference_downsample[sample_idx].flatten(),
+                                    data=reference_downsample[sample_idx].squeeze(),
                                     samplerate=self.cfg.model_conditions.super_res.target_sr)
                     soundfile.write(file=f"{temp_dir}/{sample_id}_target_sr.wav",
-                                    data=estimate_target_sr[sample_idx].flatten(),
+                                    data=estimate_target_sr[sample_idx].squeeze(),
                                     samplerate=self.cfg.model_conditions.super_res.origin_sr)
                     soundfile.write(file=f"{temp_dir}/{sample_id}_origin_sr.wav",
-                                    data=estimate_origin_sr[sample_idx].flatten(),
+                                    data=estimate_origin_sr[sample_idx].squeeze(),
                                     samplerate=self.cfg.model_conditions.super_res.origin_sr)
 
                     row.append(wandb.Audio(f"{temp_dir}/{sample_id}_ref.wav", self.cfg.model_conditions.super_res.origin_sr))
@@ -365,6 +368,10 @@ def evaluate_audio_reconstruction(y_pred: torch.Tensor, y: torch.Tensor, cfg: om
     if cfg.evaluate.metrics.visqol:
         visqol = builders.get_visqol(cfg.metrics.visqol)
         metrics['visqol'] = visqol(y_pred, y, cfg.sample_rate)
+    if cfg.evaluate.metrics.pesq:
+        from pesq import pesq_batch
+        pesq_score = torch.Tensor(pesq_batch(fs=cfg.sample_rate, deg=y.squeeze().numpy(), ref=y_pred.squeeze().numpy(), mode="nb"))
+        metrics['pesq'] = torch.mean(pesq_score)
     sisnr = builders.get_loss('sisnr', cfg)
     metrics['sisnr'] = sisnr(y_pred, y)
     return metrics

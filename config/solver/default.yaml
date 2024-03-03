@@ -69,6 +69,7 @@ evaluate:
   fixed_generation_duration: null  # in secs
   metrics:
     base: true  # run default evaluation (e.g. like train/valid stage)
+    pesq: true
 
 optim:
   epochs: ???
