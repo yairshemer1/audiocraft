@@ -70,6 +70,7 @@ evaluate:
   metrics:
     base: true  # run default evaluation (e.g. like train/valid stage)
     pesq: true
+    lsd: true
 
 optim:
   epochs: ???

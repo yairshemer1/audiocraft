@@ -372,6 +372,8 @@ def evaluate_audio_reconstruction(y_pred: torch.Tensor, y: torch.Tensor, cfg: om
         from pesq import pesq_batch
         pesq_score = torch.Tensor(pesq_batch(fs=cfg.sample_rate, deg=y.squeeze().numpy(), ref=y_pred.squeeze().numpy(), mode="nb"))
         metrics['pesq'] = torch.mean(pesq_score)
+    if cfg.evaluate.metrics.lsd:
+        metrics['lsd'] = builders.log_spectral_distance(y=y.squeeze(), y_pred=y_pred.squeeze())
     sisnr = builders.get_loss('sisnr', cfg)
     metrics['sisnr'] = sisnr(y_pred, y)
     return metrics

@@ -284,6 +284,35 @@ def get_chroma_cosine_similarity(cfg: omegaconf.DictConfig) -> metrics.ChromaCos
     return metrics.ChromaCosineSimilarityMetric(**kwargs)
 
 
+def log_spectral_distance(y, y_pred):
+    """
+    Calculates the log spectral distance (LSD) between two batches of waveforms using torch.stft.
+
+    Args:
+      y: A torch tensor of shape (num_waveforms, waveform_length) containing the first batch of waveforms.
+      y_pred: A torch tensor of shape (num_waveforms, waveform_length) containing the second batch of waveforms.
+
+    Returns:
+      A torch tensor of shape (num_waveforms,) containing the LSD between each corresponding waveform in the batches.
+    """
+    spec_y = torch.stft(y, n_fft=1024, hop_length=256, win_length=1024, normalized=False, return_complex=True)
+    spec_y_pred = torch.stft(y_pred, n_fft=1024, hop_length=256, win_length=1024, normalized=False, return_complex=True)
+    epsilon = 1e-8
+    mag_y = torch.abs(spec_y) + epsilon
+    mag_y_pred = torch.abs(spec_y_pred) + epsilon
+
+    log_mag_y = torch.log10(mag_y)
+    log_mag_y_pred = torch.log10(mag_y_pred)
+
+    diff = torch.pow(log_mag_y - log_mag_y_pred, 2)
+
+    mse = torch.mean(diff)
+
+    lsd = torch.sqrt(mse)
+
+    return lsd
+
+
 def get_audio_datasets(cfg: omegaconf.DictConfig,
                        dataset_type: DatasetType = DatasetType.AUDIO) -> tp.Dict[str, torch.utils.data.DataLoader]:
     """Build AudioDataset from configuration.
