@@ -1,10 +1,20 @@
-from . import CompressionSolver
+import logging
+import tempfile
+
+import flashy
+import julius
+import omegaconf
+import soundfile
 import torch
 import torch.nn.functional as F
-import julius
+import wandb
 from einops import rearrange
-import omegaconf
+
+from . import CompressionSolver
 from .. import quantization
+from ..utils.samples.manager import SampleManager
+
+logger = logging.getLogger(__name__)
 
 
 class ComplexCompressionSolver(CompressionSolver):
@@ -28,7 +38,7 @@ class ComplexCompressionSolver(CompressionSolver):
         x = F.pad(x, (0, 1), "constant", 0)  # pad samples for stft
         B, C, T_orig = x.shape
 
-        if self.model.training:
+        if self.model.training or self.sr_params.super_res_prob != 0.5:
             super_res_prob = self.sr_params.super_res_prob
         elif kwargs.get("force_no_downsample", False):
             super_res_prob = 0
@@ -106,3 +116,60 @@ class ComplexCompressionSolver(CompressionSolver):
         x = x.unsqueeze(1)
         x = x[..., :-1]  # remove padding
         return x
+
+    def generate(self):
+        """Generate stage."""
+        if not self.cfg.logging.log_wandb:
+            logger.info("No generate without wandb.")
+            return
+        self.model.eval()
+        sample_manager = SampleManager(self.xp, map_reference_to_sample_id=True)
+        generate_stage_name = str(self.current_stage)
+
+        loader = self.dataloaders['generate']
+        updates = len(loader)
+        lp = self.log_progress(generate_stage_name, loader, total=updates, updates=self.log_updates)
+
+        wandb_logger = self.get_wandb_logger()
+        rows = []
+        columns = ["sample_name", "ref[16kHz]", "ref[8kHz]", "estimated_8kHz_to_16kHz", "estimated_16kHz_to_16kHz"]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for batch in lp:
+                reference, _ = batch
+                reference = reference.to(self.device)
+                with torch.no_grad():
+                    _, _, qres_target_sr = self.run_model(reference)
+                    _, _, qres_origin_sr = self.run_model(reference, force_no_downsample=True)
+                assert isinstance(qres_target_sr, quantization.QuantizedResult)
+                assert isinstance(qres_origin_sr, quantization.QuantizedResult)
+
+                reference = reference.cpu()
+                reference_downsample = julius.resample_frac(reference, self.cfg.model_conditions.super_res.origin_sr, self.cfg.model_conditions.super_res.target_sr)
+                estimate_target_sr = qres_target_sr.x.cpu()
+                estimate_origin_sr = qres_origin_sr.x.cpu()
+                for sample_idx in range(len(reference)):
+                    sample_id = sample_manager._get_sample_id(sample_idx, None, None)
+                    row = [sample_id]
+
+                    soundfile.write(file=f"{temp_dir}/{sample_id}_ref.wav",
+                                    data=reference[sample_idx].squeeze(),
+                                    samplerate=self.cfg.model_conditions.super_res.origin_sr)
+                    soundfile.write(file=f"{temp_dir}/{sample_id}_ref_downsample.wav",
+                                    data=reference_downsample[sample_idx].squeeze(),
+                                    samplerate=self.cfg.model_conditions.super_res.target_sr)
+                    soundfile.write(file=f"{temp_dir}/{sample_id}_target_sr.wav",
+                                    data=estimate_target_sr[sample_idx].squeeze(),
+                                    samplerate=self.cfg.model_conditions.super_res.origin_sr)
+                    soundfile.write(file=f"{temp_dir}/{sample_id}_origin_sr.wav",
+                                    data=estimate_origin_sr[sample_idx].squeeze(),
+                                    samplerate=self.cfg.model_conditions.super_res.origin_sr)
+
+                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_ref.wav", self.cfg.model_conditions.super_res.origin_sr))
+                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_ref_downsample.wav", self.cfg.model_conditions.super_res.target_sr))
+                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_target_sr.wav", self.cfg.model_conditions.super_res.origin_sr))
+                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_origin_sr.wav", self.cfg.model_conditions.super_res.origin_sr))
+
+                    rows.append(row)
+            wandb_logger.writer.log({f"generate_epoch={self.epoch}": wandb.Table(columns=columns, data=rows)}, step=self.epoch)
+        flashy.distrib.barrier()

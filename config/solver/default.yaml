@@ -68,8 +68,8 @@ evaluate:
   truncate_audio: null
   fixed_generation_duration: null  # in secs
   metrics:
-    base: true  # run default evaluation (e.g. like train/valid stage)
-    pesq: true
+    base: true
+    pesq: false
     lsd: true
 
 optim:

@@ -233,43 +233,31 @@ class CompressionSolver(base.StandardSolver):
 
         wandb_logger = self.get_wandb_logger()
         rows = []
-        columns = ["sample_name", "ref[16kHz]", "ref[8kHz]", "estimated_8kHz_to_16kHz", "estimated_16kHz_to_16kHz"]
+        columns = ["sample_name", "ref[16kHz]", "pred[8kHz]"]
 
         with tempfile.TemporaryDirectory() as temp_dir:
             for batch in lp:
                 reference, _ = batch
                 reference = reference.to(self.device)
                 with torch.no_grad():
-                    _, _, qres_target_sr = self.run_model(reference)
-                    _, _, qres_origin_sr = self.run_model(reference, force_no_downsample=True)
-                assert isinstance(qres_target_sr, quantization.QuantizedResult)
-                assert isinstance(qres_origin_sr, quantization.QuantizedResult)
+                    _, _, qres = self.run_model(reference)
+                assert isinstance(qres, quantization.QuantizedResult)
 
                 reference = reference.cpu()
-                reference_downsample = julius.resample_frac(reference, self.cfg.model_conditions.super_res.origin_sr, self.cfg.model_conditions.super_res.target_sr)
-                estimate_target_sr = qres_target_sr.x.cpu()
-                estimate_origin_sr = qres_origin_sr.x.cpu()
+                pred = qres.x.cpu()
                 for sample_idx in range(len(reference)):
                     sample_id = sample_manager._get_sample_id(sample_idx, None, None)
                     row = [sample_id]
 
                     soundfile.write(file=f"{temp_dir}/{sample_id}_ref.wav",
                                     data=reference[sample_idx].squeeze(),
-                                    samplerate=self.cfg.model_conditions.super_res.origin_sr)
-                    soundfile.write(file=f"{temp_dir}/{sample_id}_ref_downsample.wav",
-                                    data=reference_downsample[sample_idx].squeeze(),
-                                    samplerate=self.cfg.model_conditions.super_res.target_sr)
-                    soundfile.write(file=f"{temp_dir}/{sample_id}_target_sr.wav",
-                                    data=estimate_target_sr[sample_idx].squeeze(),
-                                    samplerate=self.cfg.model_conditions.super_res.origin_sr)
-                    soundfile.write(file=f"{temp_dir}/{sample_id}_origin_sr.wav",
-                                    data=estimate_origin_sr[sample_idx].squeeze(),
+                                    samplerate=self.cfg.sample_rate)
+                    soundfile.write(file=f"{temp_dir}/{sample_id}_pred.wav",
+                                    data=pred[sample_idx].squeeze(),
                                     samplerate=self.cfg.model_conditions.super_res.origin_sr)
 
-                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_ref.wav", self.cfg.model_conditions.super_res.origin_sr))
-                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_ref_downsample.wav", self.cfg.model_conditions.super_res.target_sr))
-                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_target_sr.wav", self.cfg.model_conditions.super_res.origin_sr))
-                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_origin_sr.wav", self.cfg.model_conditions.super_res.origin_sr))
+                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_ref.wav", self.cfg.sample_rate))
+                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_pred.wav", self.cfg.sample_rate))
 
                     rows.append(row)
             wandb_logger.writer.log({f"generate_epoch={self.epoch}": wandb.Table(columns=columns, data=rows)}, step=self.epoch)
@@ -375,5 +363,6 @@ def evaluate_audio_reconstruction(y_pred: torch.Tensor, y: torch.Tensor, cfg: om
     if cfg.evaluate.metrics.lsd:
         metrics['lsd'] = builders.log_spectral_distance(y=y.squeeze(), y_pred=y_pred.squeeze())
     sisnr = builders.get_loss('sisnr', cfg)
+    metrics['mse'] = torch.nn.functional.mse_loss(y_pred, y)
     metrics['sisnr'] = sisnr(y_pred, y)
     return metrics
