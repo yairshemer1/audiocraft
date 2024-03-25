@@ -31,7 +31,7 @@ class ComplexEncodecModel(EncodecModel):
                          causal=causal,
                          renormalize=renormalize
                          )
-        self.proj_mat = nn.Linear(2, 128)
+        self.proj_mat = nn.Linear(1, 128)
 
     def forward(self, x: torch.Tensor, **kwargs) -> qt.QuantizedResult:
         condition = kwargs.get('condition', None)

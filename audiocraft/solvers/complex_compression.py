@@ -48,11 +48,10 @@ class ComplexCompressionSolver(CompressionSolver):
             super_res_prob = 1
 
         unif = torch.ones(B) * super_res_prob
-        super_res_nob = torch.bernoulli(unif).to(self.device)
-        condition_matrix = torch.stack([super_res_nob, 1 - super_res_nob], dim=1)
+        condition_matrix = torch.bernoulli(unif).to(self.device).unsqueeze(-1)
 
-        lr_batch = x[(super_res_nob == 1)]
-        hr_batch = x[(super_res_nob == 0)]
+        lr_batch = x[(condition_matrix == 1)]
+        hr_batch = x[(condition_matrix == 0)]
         if lr_batch.shape[0] == B:  # all low resolution
             lr_batch = julius.resample_frac(lr_batch, self.sr_params.origin_sr, self.sr_params.target_sr)
             lr_batch = F.pad(lr_batch, (0, 1), "constant", 0)  # pad samples for stft
@@ -96,7 +95,7 @@ class ComplexCompressionSolver(CompressionSolver):
         concat_tensors = []
         lr_ind, hr_ind = 0, 0
         for i in range(B):
-            if super_res_nob[i] == 1:
+            if condition_matrix[i] == 1:
                 concat_tensors.append(lr_stft[lr_ind])
                 lr_ind += 1
             else:
