@@ -14,7 +14,7 @@ model_conditions:
 
 data_preprocess:
   n_fft: 1023
-  hop_length: 255 # n_fft // 4
+  hop_length: 250 # n_fft // 4
   win_length: 1023 # n_fft
   normalized: false
 

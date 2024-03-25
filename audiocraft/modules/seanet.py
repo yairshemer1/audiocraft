@@ -233,11 +233,13 @@ class SEANetEncoder2d(nn.Module):
                  norm: str = 'none', norm_params: tp.Dict[str, tp.Any] = {}, kernel_size: int = 7,
                  last_kernel_size: int = 7, residual_kernel_size: int = 3, dilation_base: int = 2, causal: bool = False,
                  pad_mode: str = 'reflect', true_skip: bool = True, compress: int = 2, lstm: int = 0,
-                 disable_norm_outer_blocks: int = 0):
+                 disable_norm_outer_blocks: int = 0, frequency_bins: int = 512):
         super().__init__()
         self.channels = channels
         self.dimension = dimension
         self.n_filters = n_filters
+        self.frequency_bins = frequency_bins
+        assert self.frequency_bins == 512, "model handles 512 frequency channels, change manually and in config file" 
         self.ratios = list(reversed(ratios))
         del ratios
         self.n_residual_layers = n_residual_layers
@@ -278,9 +280,10 @@ class SEANetEncoder2d(nn.Module):
             mult *= 2
 
         model += [nn.Flatten(1, 2)]
+        freq_channels = int(self.frequency_bins // self.hop_length)
         model += [
             act(**activation_params),
-            StreamableConv1d(mult * n_filters * 4, mult * n_filters, last_kernel_size,
+            StreamableConv1d(mult * n_filters * freq_channels, mult * n_filters, last_kernel_size,
                              norm='none' if self.disable_norm_outer_blocks == self.n_blocks else norm,
                              norm_kwargs=norm_params, causal=causal, pad_mode=pad_mode)
         ]
@@ -441,11 +444,13 @@ class SEANetDecoder2d(nn.Module):
                  norm: str = 'none', norm_params: tp.Dict[str, tp.Any] = {}, kernel_size: int = 7,
                  last_kernel_size: int = 7, residual_kernel_size: int = 3, dilation_base: int = 2, causal: bool = False,
                  pad_mode: str = 'reflect', true_skip: bool = True, compress: int = 2, lstm: int = 0,
-                 disable_norm_outer_blocks: int = 0, trim_right_ratio: float = 1.0):
+                 disable_norm_outer_blocks: int = 0, trim_right_ratio: float = 1.0, frequency_bins: int = 512):
         super().__init__()
         self.dimension = dimension
         self.channels = channels
         self.n_filters = n_filters
+        self.frequency_bins = frequency_bins
+        assert self.frequency_bins == 512, "model handles 512 frequency channels, change manually and in config file" 
         self.ratios = ratios
         del ratios
         self.n_residual_layers = n_residual_layers
@@ -467,12 +472,13 @@ class SEANetDecoder2d(nn.Module):
         if lstm:
             model += [StreamableLSTM(mult * n_filters, num_layers=lstm)]
 
+        freq_channels = int(self.frequency_bins // self.hop_length)
         model += [
-            StreamableConv1d(mult * n_filters, mult * n_filters * 4, kernel_size,
+            StreamableConv1d(mult * n_filters, mult * n_filters * freq_channels, kernel_size,
                              norm='none' if self.disable_norm_outer_blocks == self.n_blocks else norm,
                              norm_kwargs=norm_params, causal=causal, pad_mode=pad_mode)
         ]
-        model += [nn.Unflatten(1, (mult * n_filters, 4))]
+        model += [nn.Unflatten(1, (mult * n_filters, freq_channels))]
 
         # Upsample to raw audio scale
         for i, ratio in enumerate(self.ratios):

@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as F
 import wandb
 from einops import rearrange
+from flashy.distrib import rank_zero_only
 
 from . import CompressionSolver
 from .. import quantization
@@ -32,6 +33,7 @@ class ComplexCompressionSolver(CompressionSolver):
 
         y_pred = qres.x
         y = y[..., :y_pred.shape[-1]]  # trim to match y_pred
+        assert y.shape[-1] == y_pred.shape[-1], "both y and y_pred should come out of same length"
         return y, y_pred, qres
 
     def preprocess(self, x, **kwargs):
@@ -117,6 +119,7 @@ class ComplexCompressionSolver(CompressionSolver):
         x = x[..., :-1]  # remove padding
         return x
 
+    @rank_zero_only
     def generate(self):
         """Generate stage."""
         if not self.cfg.logging.log_wandb:
