@@ -204,7 +204,8 @@ class CompressionSolver(base.StandardSolver):
             for idx, batch in enumerate(lp):
                 x = batch.to(self.device)
                 with torch.no_grad():
-                    y, y_pred, _ = self.run_model(x)
+                    self.sr_params.super_res_prob = 1
+                    y, y_pred, _ = self.run_model(x, is_gen_or_eval=True)
 
                 y_pred = y_pred.cpu()
                 y = y.cpu()  # should already be on CPU but just in case
