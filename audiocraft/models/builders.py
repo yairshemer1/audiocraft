@@ -85,7 +85,11 @@ def get_compression_model(cfg: omegaconf.DictConfig) -> CompressionModel:
         renormalize = kwargs.pop('renormalize', False)
         # deprecated params
         kwargs.pop('renorm', None)
-        encodec_klass = ComplexEncodecModel if is_complex else EncodecModel
+        if is_complex:
+            encodec_klass = ComplexEncodecModel
+            kwargs['num_conditions'] = len(cfg.model_conditions)
+        else:
+            encodec_klass = EncodecModel
         return encodec_klass(encoder, decoder, quantizer,
                              frame_rate=frame_rate, renormalize=renormalize, **kwargs).to(cfg.device)
     else:
