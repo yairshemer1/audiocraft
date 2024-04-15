@@ -132,5 +132,5 @@ class Balancer:
             out_grad.add_(grads[name], alpha=scale)
             effective_loss += scale * losses[name].detach()
         # Send the computed partial derivative with respect to the output of the model to the model.
-        input.backward(out_grad)
+        input.backward(out_grad, retain_graph=True)
         return effective_loss

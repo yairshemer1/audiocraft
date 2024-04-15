@@ -2,11 +2,10 @@
 
 defaults:
   - compression/default
+  - /solver: complex_compression
   - /model: encodec/complex_encodec
   - override /dset: audio/valentini
   - _self_
-
-solver: complex_compression
 
 channels: 1
 sample_rate: 16000

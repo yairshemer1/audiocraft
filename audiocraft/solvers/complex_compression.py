@@ -1,5 +1,6 @@
 import logging
 import tempfile
+import multiprocessing
 
 import flashy
 import julius
@@ -11,9 +12,11 @@ import wandb
 from einops import rearrange
 from flashy.distrib import rank_zero_only
 
+from .compression import evaluate_audio_reconstruction
 from . import CompressionSolver
 from .. import quantization
 from ..utils.samples.manager import SampleManager
+from ..utils.utils import get_pool_executor
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +27,7 @@ class ComplexCompressionSolver(CompressionSolver):
         self.preprocess_params = cfg.data_preprocess
         self.sr_params = cfg.model_conditions.super_res
 
-    def run_model(self, x, **kwargs) -> [torch.Tensor, ..., quantization.QuantizedResult]:
+    def run_model(self, x, **kwargs):
         y = x.clone()
 
         x, cond, y_downsampled = self.preprocess(x=x, is_gen_or_eval=kwargs.get('is_gen_or_eval', False))
@@ -42,20 +45,14 @@ class ComplexCompressionSolver(CompressionSolver):
         if y_lr:
             y_lr = torch.stack(y_lr)
             y_lr = y_lr[..., :y_pred_lr.shape[-1]]  # trim to match y_pred
+            assert y_lr.shape[-1] == y_pred_lr.shape[-1], "both y and y_pred should come out of same length"
 
         if y_sr:
             y_sr = torch.stack(y_sr)
             y_sr = y_sr[..., :y_pred_sr.shape[-1]]  # trim to match y_pred
+            assert y_sr.shape[-1] == y_pred_sr.shape[-1], "both y and y_pred should come out of same length"
 
-        if y_lr:
-            paddings = y_pred_sr.shape[-1] - y_pred_lr.shape[-1]
-            y_pred = torch.concat([*y_pred_sr, *F.pad(y_pred_lr, (0, paddings))])
-            y = torch.concat([*y_sr, *F.pad(y_lr, (0, paddings))])
-        else:
-            y = y_sr
-            y_pred = y_pred_sr
-        assert y.shape[-1] == y_pred.shape[-1], "both y and y_pred should come out of same length"
-        return y, y_pred, qres
+        return y_lr, y_sr, y_pred_lr, y_pred_sr, qres
 
     def preprocess(self, x, is_gen_or_eval=False):
         x = F.pad(x, (0, 1), "constant", 0)  # pad samples for stft
@@ -114,7 +111,7 @@ class ComplexCompressionSolver(CompressionSolver):
 
         return x_lr, x_sr
 
-    def run_step_no(self, idx: int, batch: torch.Tensor, metrics: dict):
+    def run_step(self, idx: int, batch: torch.Tensor, metrics: dict):
         """Perform one training or valid step on a given batch."""
         x = batch.to(self.device)
 
@@ -126,9 +123,7 @@ class ComplexCompressionSolver(CompressionSolver):
             d_losses: dict = {}
             if len(self.adv_losses) > 0 and torch.rand(1, generator=self.rng).item() <= 1 / self.cfg.adversarial.every:
                 for adv_name, adversary in self.adv_losses.items():
-                    disc_loss_sr = adversary.train_adv(y_pred_sr, y_sr)
-                    disc_loss_sr += adversary.train_adv(y_pred_lr, y_lr)
-                    d_losses[f'd_{adv_name}'] = disc_loss_sr
+                    d_losses[f'd_{adv_name}'] = (adversary.train_adv(y_pred_sr, y_sr) + adversary.train_adv(y_pred_lr, y_lr)) / 2
                 metrics['d_loss'] = torch.sum(torch.stack(list(d_losses.values())))
             metrics.update(d_losses)
 
@@ -159,7 +154,7 @@ class ComplexCompressionSolver(CompressionSolver):
         # weighted losses
         balanced_losses = {}
         for k in balanced_losses_lr.keys():
-            balanced_losses[k] = balanced_losses_sr[k] + balanced_losses_lr[k]
+            balanced_losses[k] = (balanced_losses_sr[k] + balanced_losses_lr[k]) / 2
         metrics.update(balanced_losses)
         metrics.update(other_losses)
         metrics.update(qres.metrics)
@@ -178,7 +173,7 @@ class ComplexCompressionSolver(CompressionSolver):
 
             # balancer losses backward, returns effective training loss
             # with effective weights at the current batch.
-            metrics['g_loss'] = self.balancer.backward(balanced_losses_lr, y_pred_lr) + self.balancer.backward(balanced_losses_sr, y_pred_sr)
+            metrics['g_loss'] = (self.balancer.backward(balanced_losses_lr, y_pred_lr) + self.balancer.backward(balanced_losses_sr, y_pred_sr)) / 2
             # add metrics corresponding to weight ratios
             metrics.update(self.balancer.metrics)
             ratio2 = sum(p.grad.data.norm(p=2).pow(2)
@@ -199,9 +194,7 @@ class ComplexCompressionSolver(CompressionSolver):
         info_losses: dict = {}
         with torch.no_grad():
             for loss_name, criterion in self.info_losses.items():
-                loss = criterion(y_pred_lr, y_lr)
-                loss += criterion(y_pred_sr, y_sr)
-                info_losses[loss_name] = loss
+                info_losses[loss_name] = (criterion(y_pred_sr, y_sr) + criterion(y_pred_lr, y_lr)) / 2
 
         metrics.update(info_losses)
 
@@ -231,20 +224,25 @@ class ComplexCompressionSolver(CompressionSolver):
 
         wandb_logger = self.get_wandb_logger()
         rows = []
-        columns = ["sample_name", "ref[16kHz]", "ref[8kHz]", "estimated_super_res[16kHz]"]
-
+        columns = ["sample_name", "ref[16kHz]", "ref[8kHz]"]
+        if self.sr_params.super_res_prob == 0:
+            columns.append("pred_no_super_res[8kHz]")
+        else:
+            columns.append("pred_super_res[16kHz]")
+            
         with tempfile.TemporaryDirectory() as temp_dir:
             for batch in lp:
                 reference, _ = batch
                 reference = reference.to(self.device)
                 with torch.no_grad():
-                    self.sr_params.super_res_prob = 1.0
-                    _, pred, qres_target_sr = self.run_model(reference, is_gen_or_eval=True)
-                assert isinstance(qres_target_sr, quantization.QuantizedResult)
-                
+                    _, _, y_pred_lr, y_pred_sr, _ = self.run_model(reference, is_gen_or_eval=True)
                 reference = reference.cpu()
                 reference_downsample = julius.resample_frac(reference, self.sr_params.origin_sr, self.sr_params.target_sr)
-                pred = pred.cpu()
+
+                if self.sr_params.super_res_prob == 0:
+                    pred = y_pred_lr.cpu()
+                else:
+                    pred = y_pred_sr.cpu()
 
                 for sample_idx in range(len(reference)):
                     sample_id = sample_manager._get_sample_id(sample_idx, None, None)
@@ -267,3 +265,37 @@ class ComplexCompressionSolver(CompressionSolver):
                     rows.append(row)
             wandb_logger.writer.log({f"generate_epoch={self.epoch}": wandb.Table(columns=columns, data=rows)}, step=self.epoch)
         flashy.distrib.barrier()
+
+    def evaluate(self):
+        """Evaluate stage. Runs audio reconstruction evaluation."""
+        self.model.eval()
+        evaluate_stage_name = str(self.current_stage)
+
+        loader = self.dataloaders['evaluate']
+        updates = len(loader)
+        lp = self.log_progress(f'{evaluate_stage_name} inference', loader, total=updates, updates=self.log_updates)
+        average = flashy.averager()
+
+        pendings = []
+        ctx = multiprocessing.get_context('spawn')
+        with get_pool_executor(self.cfg.evaluate.num_workers, mp_context=ctx) as pool:
+            for _, batch in enumerate(lp):
+                x = batch.to(self.device)
+                with torch.no_grad():
+                    y_lr, y_sr, y_pred_lr, y_pred_sr, _ = self.run_model(x, is_gen_or_eval=True)
+                if self.sr_params.super_res_prob == 0:
+                    pred = y_pred_lr.cpu()
+                    ref = y_lr.cpu()
+                else:
+                    pred = y_pred_sr.cpu()
+                    ref = y_sr.cpu()
+
+                pendings.append(pool.submit(evaluate_audio_reconstruction, pred, ref, self.cfg))
+
+            metrics_lp = self.log_progress(f'{evaluate_stage_name} metrics', pendings, updates=self.log_updates)
+            for pending in metrics_lp:
+                metrics = pending.result()
+                metrics = average(metrics)
+
+        metrics = flashy.distrib.average_metrics(metrics, len(loader))
+        return metrics

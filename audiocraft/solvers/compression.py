@@ -14,6 +14,7 @@ import flashy
 import julius
 import omegaconf
 import torch
+import torch.nn.functional as F
 import wandb
 from torch import nn
 import soundfile
@@ -83,7 +84,7 @@ class CompressionSolver(base.StandardSolver):
         self.logger.info("Info losses:")
         self.logger.info(self.info_losses)
 
-    def run_model(self, x, **kwargs) -> [torch.Tensor, torch.Tensor, quantization.QuantizedResult]:
+    def run_model(self, x, **kwargs):
         y = x.clone()
 
         qres = self.model(x)
@@ -204,8 +205,7 @@ class CompressionSolver(base.StandardSolver):
             for idx, batch in enumerate(lp):
                 x = batch.to(self.device)
                 with torch.no_grad():
-                    self.sr_params.super_res_prob = 1
-                    y, y_pred, _ = self.run_model(x, is_gen_or_eval=True)
+                    y, y_pred, _ = self.run_model(x)
 
                 y_pred = y_pred.cpu()
                 y = y.cpu()  # should already be on CPU but just in case
@@ -255,7 +255,7 @@ class CompressionSolver(base.StandardSolver):
                                     samplerate=self.cfg.sample_rate)
                     soundfile.write(file=f"{temp_dir}/{sample_id}_pred.wav",
                                     data=pred[sample_idx].squeeze(),
-                                    samplerate=self.cfg.model_conditions.super_res.origin_sr)
+                                    samplerate=self.cfg.sample_rate)
 
                     row.append(wandb.Audio(f"{temp_dir}/{sample_id}_ref.wav", self.cfg.sample_rate))
                     row.append(wandb.Audio(f"{temp_dir}/{sample_id}_pred.wav", self.cfg.sample_rate))
