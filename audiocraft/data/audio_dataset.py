@@ -54,7 +54,7 @@ class BaseInfo:
         return {
             field.name: self.__getattribute__(field.name)
             for field in fields(self)
-            }
+        }
 
 
 @dataclass(order=True)
@@ -87,10 +87,10 @@ class SegmentInfo(BaseInfo):
     seek_time: float
     # The following values are given once the audio is processed, e.g.
     # at the target sample rate and target number of channels.
-    n_frames: int      # actual number of frames without padding
+    n_frames: int  # actual number of frames without padding
     total_frames: int  # total number of frames, padding included
-    sample_rate: int   # actual sample rate
-    channels: int      # number of audio channels.
+    sample_rate: int  # actual sample rate
+    channels: int  # number of audio channels.
 
 
 DEFAULT_EXTS = ['.wav', '.mp3', '.flac', '.ogg', '.m4a']
@@ -126,6 +126,7 @@ def _resolve_audio_meta(m: AudioMeta, fast: bool = True) -> AudioMeta:
     Returns:
         AudioMeta: Audio meta with resolved path.
     """
+
     def is_abs(m):
         if fast:
             return str(m)[0] == '/'
@@ -292,6 +293,7 @@ class AudioDataset:
             that `num_samples = total_batch_size * num_updates_per_epoch`, with
             `total_batch_size` the overall batch size accounting for all gpus.
     """
+
     def __init__(self,
                  meta: tp.List[AudioMeta],
                  segment_duration: tp.Optional[float] = None,
@@ -424,7 +426,7 @@ class AudioDataset:
                 # We use index, plus extra randomness, either totally random if we don't know the epoch.
                 # otherwise we make use of the epoch number and optional shuffle_seed.
                 if self.current_epoch is None:
-                    rng.manual_seed(index + self.num_samples * random.randint(0, 2**24))
+                    rng.manual_seed(index + self.num_samples * random.randint(0, 2 ** 24))
                 else:
                     rng.manual_seed(index + self.num_samples * (self.current_epoch + self.shuffle_seed))
             else:
@@ -477,22 +479,29 @@ class AudioDataset:
 
         if self.return_info:
             if len(samples) > 0:
-                assert len(samples[0]) == 2
+                assert len(samples[0]) == 4
                 assert isinstance(samples[0][0], torch.Tensor)
                 assert isinstance(samples[0][1], SegmentInfo)
+                assert isinstance(samples[0][2], torch.Tensor)
+                assert isinstance(samples[0][3], SegmentInfo)
 
-            wavs = [wav for wav, _ in samples]
-            segment_infos = [copy.deepcopy(info) for _, info in samples]
+            noisy_wavs = [wav for wav, _, _, _ in samples]
+            noisy_segment_infos = [copy.deepcopy(info) for _, info, _, _ in samples]
+            clean_wavs = [wav for _, _, wav, _ in samples]
+            clean_segment_infos = [copy.deepcopy(info) for _, _, _, info in samples]
 
             if to_pad:
                 # Each wav could be of a different duration as they are not segmented.
                 for i in range(len(samples)):
                     # Determines the total length of the signal with padding, so we update here as we pad.
-                    segment_infos[i].total_frames = max_len
-                    wavs[i] = _pad_wav(wavs[i])
+                    noisy_segment_infos[i].total_frames = max_len
+                    clean_segment_infos[i].total_frames = max_len
+                    noisy_wavs[i] = _pad_wav(noisy_wavs[i])
+                    clean_wavs[i] = _pad_wav(clean_wavs[i])
 
-            wav = torch.stack(wavs)
-            return wav, segment_infos
+            noisy_wav = torch.stack(noisy_wavs)
+            clean_wav = torch.stack(clean_wavs)
+            return noisy_wav, noisy_segment_infos, clean_wav, clean_segment_infos
         else:
             assert isinstance(samples[0], torch.Tensor)
             if to_pad:
@@ -512,7 +521,7 @@ class AudioDataset:
             meta = [m for m in meta if m.duration <= self.max_audio_duration]
 
         filtered_len = len(meta)
-        removed_percentage = 100*(1-float(filtered_len)/orig_len)
+        removed_percentage = 100 * (1 - float(filtered_len) / orig_len)
         msg = 'Removed %.2f percent of the data because it was too short or too long.' % removed_percentage
         if removed_percentage < 10:
             logging.debug(msg)
@@ -557,6 +566,69 @@ class AudioDataset:
         else:
             meta = find_audio_files(root, exts, minimal=minimal_meta, resolve=True)
         return cls(meta, **kwargs)
+
+
+class NoisyCleanDataset(AudioDataset):
+    def __getitem__(self, index: int) -> tp.Union[
+        tp.Tuple[torch.Tensor, torch.Tensor], tp.Tuple[torch.Tensor, SegmentInfo, torch.Tensor, SegmentInfo]]:
+        if self.segment_duration is None:
+            file_meta = self.meta[index]
+            out_clean, sr = audio_read(file_meta.path.replace('noisy', 'clean'))
+            out_noisy, sr = audio_read(file_meta.path)
+            out_clean = convert_audio(out_clean, sr, self.sample_rate, self.channels)
+            out_noisy = convert_audio(out_noisy, sr, self.sample_rate, self.channels)
+            n_frames_clean = out_clean.shape[-1]
+            n_frames_noisy = out_noisy.shape[-1]
+            segment_info_clean = SegmentInfo(file_meta, seek_time=0., n_frames=n_frames_clean, total_frames=n_frames_clean,
+                                             sample_rate=self.sample_rate, channels=out_clean.shape[0])
+            segment_info_noisy = SegmentInfo(file_meta, seek_time=0., n_frames=n_frames_noisy, total_frames=n_frames_noisy,
+                                             sample_rate=self.sample_rate, channels=out_noisy.shape[0])
+        else:
+            rng = torch.Generator()
+            if self.shuffle:
+                # We use index, plus extra randomness, either totally random if we don't know the epoch.
+                # otherwise we make use of the epoch number and optional shuffle_seed.
+                if self.current_epoch is None:
+                    rng.manual_seed(index + self.num_samples * random.randint(0, 2 ** 24))
+                else:
+                    rng.manual_seed(index + self.num_samples * (self.current_epoch + self.shuffle_seed))
+            else:
+                # We only use index
+                rng.manual_seed(index)
+
+            for retry in range(self.max_read_retry):
+                file_meta = self.sample_file(index, rng)
+                # We add some variance in the file position even if audio file is smaller than segment
+                # without ending up with empty segments
+                max_seek = max(0, file_meta.duration - self.segment_duration * self.min_segment_ratio)
+                seek_time = torch.rand(1, generator=rng).item() * max_seek
+                try:
+                    out_clean, sr = audio_read(file_meta.path.replace('noisy', 'clean'), seek_time, self.segment_duration, pad=False)
+                    out_noisy, sr = audio_read(file_meta.path, seek_time, self.segment_duration, pad=False)
+                    out_clean = convert_audio(out_clean, sr, self.sample_rate, self.channels)
+                    out_noisy = convert_audio(out_noisy, sr, self.sample_rate, self.channels)
+                    n_frames_clean = out_clean.shape[-1]
+                    n_frames_noisy = out_noisy.shape[-1]
+                    target_frames = int(self.segment_duration * self.sample_rate)
+                    if self.pad:
+                        out_clean = F.pad(out_clean, (0, target_frames - n_frames_clean))
+                        out_noisy = F.pad(out_noisy, (0, target_frames - n_frames_noisy))
+                    segment_info_clean = SegmentInfo(file_meta, seek_time, n_frames=n_frames_clean, total_frames=target_frames,
+                                                     sample_rate=self.sample_rate, channels=out_clean.shape[0])
+                    segment_info_noisy = SegmentInfo(file_meta, seek_time, n_frames=n_frames_noisy, total_frames=target_frames,
+                                                     sample_rate=self.sample_rate, channels=out_noisy.shape[0])
+                except Exception as exc:
+                    logger.warning("Error opening file %s: %r", file_meta.path, exc)
+                    if retry == self.max_read_retry - 1:
+                        raise
+                else:
+                    break
+
+        if self.return_info:
+            # Returns the wav and additional information on the wave segment
+            return out_noisy, segment_info_noisy, out_clean, segment_info_clean
+        else:
+            return out_noisy, out_clean
 
 
 def main():
