@@ -59,4 +59,5 @@ egs/
 /notes
 /slurm_logs
 runner*.sh
+scratch.py
 

@@ -11,7 +11,10 @@ model_conditions:
     super_res_prob: 0.5
     origin_sr: ${sample_rate}
     target_sr: 8000
-
+  denoise:
+    denoise_prob: 0.5
+    # augments here
+    
 data_preprocess:
   n_fft: 1023
   hop_length: 250 # n_fft // 4
@@ -19,8 +22,8 @@ data_preprocess:
   normalized: false
 
 seanet:
-  n_filters: 64
-  ratios: [2, 4, 4, 4]
+  n_filters: 48
+  ratios: [4, 2, 2]
 
 rvq:
   bins: 2048
