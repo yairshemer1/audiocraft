@@ -12,9 +12,10 @@ import wandb
 from einops import rearrange
 from flashy.distrib import rank_zero_only
 
-from .compression import evaluate_audio_reconstruction
+
+from . import builders
 from . import CompressionSolver
-from .. import quantization
+from .compression import evaluate_audio_reconstruction
 from ..utils.samples.manager import SampleManager
 from ..utils.utils import get_pool_executor
 
@@ -22,100 +23,73 @@ logger = logging.getLogger(__name__)
 
 
 class ComplexCompressionSolver(CompressionSolver):
+    
+    DATASET_TYPE: builders.DatasetType = builders.DatasetType.NOISY_CLEAN
+
     def __init__(self, cfg: omegaconf.DictConfig):
         super().__init__(cfg)
         self.preprocess_params = cfg.data_preprocess
-        self.sr_params = cfg.model_conditions.super_res
+        self.denoise_params = cfg.model_conditions.denoise
 
     def run_model(self, x, **kwargs):
-        y = x.clone()
-
-        x, cond, y_downsampled = self.preprocess(x=x, is_gen_or_eval=kwargs.get('is_gen_or_eval', False))
+        y_clean = kwargs["clean_data"]
+        y_noisy = x.clone()
+        x, cond = self.preprocess(x)
         qres = self.model(x=x, condition=cond)
-        y_pred_lr, y_pred_sr = self.postprocess(x=qres.x, cond=cond)
+        qres.x = self.postprocess(qres.x)
 
-        y_lr, y_sr = [], []
-
-        for i, bit in enumerate(cond):
-            if bit == 1:
-                y_sr.append(y[i])
+        y_pred = qres.x
+        y = []
+        for idx, c in enumerate(cond):
+            if c == 1:
+                y.append(y_clean[idx])
             else:
-                y_lr.append(y_downsampled[i])
+                y.append(y_noisy[idx])
 
-        if y_lr:
-            y_lr = torch.stack(y_lr)
-            y_lr = y_lr[..., :y_pred_lr.shape[-1]]  # trim to match y_pred
-            assert y_lr.shape[-1] == y_pred_lr.shape[-1], "both y and y_pred should come out of same length"
+        y = torch.stack(y)
+        y = y[..., :y_pred.shape[-1]]  # trim to match y_pred
+        assert y.shape[-1] == y_pred.shape[-1], "both y and y_pred should come out of same length"
+        return y, y_pred, qres
 
-        if y_sr:
-            y_sr = torch.stack(y_sr)
-            y_sr = y_sr[..., :y_pred_sr.shape[-1]]  # trim to match y_pred
-            assert y_sr.shape[-1] == y_pred_sr.shape[-1], "both y and y_pred should come out of same length"
-
-        return y_lr, y_sr, y_pred_lr, y_pred_sr, qres
-
-    def preprocess(self, x, is_gen_or_eval=False):
+    def preprocess(self, x):
         x = F.pad(x, (0, 1), "constant", 0)  # pad samples for stft
-        B, C, T_orig = x.shape
+        B, C, T = x.shape
 
-        x_downsampled = julius.resample_frac(x, self.sr_params.origin_sr, self.sr_params.target_sr)
-        x_downsampled = F.pad(x_downsampled, (0, 1), "constant", 0)  # pad samples for stft
-        T_new = x_downsampled.shape[-1]
-        x_stft = torch.stft(x_downsampled.view(-1, T_new),
-                            n_fft=self.preprocess_params.n_fft,
-                            hop_length=self.preprocess_params.hop_length // 2,
-                            win_length=self.preprocess_params.win_length,
-                            normalized=self.preprocess_params.normalized,
-                            return_complex=False)
-
-        unif = torch.ones(B) * self.sr_params.super_res_prob
-        condition_matrix = torch.bernoulli(unif).to(self.device).unsqueeze(-1)
-        while not is_gen_or_eval and (0 not in condition_matrix or 1 not in condition_matrix):
-            condition_matrix = torch.bernoulli(unif).to(self.device).unsqueeze(-1)
-
-        x_stft = rearrange(x_stft, 'b f t c -> b c f t')
-        return x_stft, condition_matrix, x_downsampled[..., :-1]
-
-    def postprocess(self, x: torch.Tensor, cond: torch.Tensor):
-        x = rearrange(x, 'b c f t -> b f t c')
-        x_lr, x_sr = [], []
-        for i, sr_bit in enumerate(cond):
-            if sr_bit == 1:
-                x_sr.append(x[i])
-            else:
-                x_lr.append(x[i])
-        
-        if x_sr:
-            x_sr = torch.stack(x_sr)
-            x_sr = torch.istft(torch.view_as_complex(x_sr.contiguous()),
+        x_stft = torch.stft(x.view(-1, T),
                             n_fft=self.preprocess_params.n_fft,
                             hop_length=self.preprocess_params.hop_length,
                             win_length=self.preprocess_params.win_length,
                             normalized=self.preprocess_params.normalized,
                             return_complex=False)
 
-            x_sr = x_sr.unsqueeze(1)
-            x_sr = x_sr[..., :-1]  # remove padding
-        if x_lr:
-            x_lr = torch.stack(x_lr)
+        unif = torch.ones(B) * self.denoise_params.denoise_prob  # its actually denoise
+        condition_matrix = torch.bernoulli(unif).to(self.device).unsqueeze(-1)
 
-            x_lr = torch.istft(torch.view_as_complex(x_lr.contiguous()),
-                            n_fft=self.preprocess_params.n_fft,
-                            hop_length=self.preprocess_params.hop_length // 2,
-                            win_length=self.preprocess_params.win_length,
-                            normalized=self.preprocess_params.normalized,
-                            return_complex=False)
+        x_stft = rearrange(x_stft, 'b f t c -> b c f t')
+        return x_stft, condition_matrix
 
-            x_lr = x_lr.unsqueeze(1)
-            x_lr = x_lr[..., :-1]  # remove padding
+    def postprocess(self, x: torch.Tensor):
+        x = rearrange(x, 'b c f t -> b f t c')
 
-        return x_lr, x_sr
+        x = torch.istft(torch.view_as_complex(x.contiguous()),
+                        n_fft=self.preprocess_params.n_fft,
+                        hop_length=self.preprocess_params.hop_length,
+                        win_length=self.preprocess_params.win_length,
+                        normalized=self.preprocess_params.normalized,
+                        return_complex=False)
+
+        x = x.unsqueeze(1)
+        x = x[..., :-1]  # remove padding
+
+        return x
 
     def run_step(self, idx: int, batch: torch.Tensor, metrics: dict):
         """Perform one training or valid step on a given batch."""
-        x = batch.to(self.device)
+        noisy, clean = batch
+        noisy = noisy.to(self.device)
+        clean = clean.to(self.device)
 
-        y_lr, y_sr, y_pred_lr, y_pred_sr, qres = self.run_model(x)
+        y, y_pred, qres = self.run_model(noisy, clean_data=clean)
         # Log bandwidth in kb/s
         metrics['bandwidth'] = qres.bandwidth.mean()
 
@@ -123,12 +97,12 @@ class ComplexCompressionSolver(CompressionSolver):
             d_losses: dict = {}
             if len(self.adv_losses) > 0 and torch.rand(1, generator=self.rng).item() <= 1 / self.cfg.adversarial.every:
                 for adv_name, adversary in self.adv_losses.items():
-                    d_losses[f'd_{adv_name}'] = (adversary.train_adv(y_pred_sr, y_sr) + adversary.train_adv(y_pred_lr, y_lr)) / 2
+                    disc_loss = adversary.train_adv(y_pred, y)
+                    d_losses[f'd_{adv_name}'] = disc_loss
                 metrics['d_loss'] = torch.sum(torch.stack(list(d_losses.values())))
             metrics.update(d_losses)
 
-        balanced_losses_lr: dict = {}
-        balanced_losses_sr: dict = {}
+        balanced_losses: dict = {}
         other_losses: dict = {}
 
         # penalty from quantization
@@ -137,24 +111,16 @@ class ComplexCompressionSolver(CompressionSolver):
 
         # adversarial losses
         for adv_name, adversary in self.adv_losses.items():
-            adv_loss_lr, feat_loss_lr = adversary(y_pred_lr, y_lr)
-            adv_loss_sr, feat_loss_sr = adversary(y_pred_sr, y_sr)
-            balanced_losses_lr[f'adv_{adv_name}'] = adv_loss_lr
-            balanced_losses_sr[f'adv_{adv_name}'] = adv_loss_sr
-            balanced_losses_lr[f'feat_{adv_name}'] = feat_loss_lr
-            balanced_losses_sr[f'feat_{adv_name}'] = feat_loss_sr
+            adv_loss, feat_loss = adversary(y_pred, y)
+            balanced_losses[f'adv_{adv_name}'] = adv_loss
+            balanced_losses[f'feat_{adv_name}'] = feat_loss
 
         # auxiliary losses
         for loss_name, criterion in self.aux_losses.items():
-            loss_sr = criterion(y_pred_sr, y_sr)
-            loss_lr = criterion(y_pred_lr, y_lr)
-            balanced_losses_sr[loss_name] = loss_sr
-            balanced_losses_lr[loss_name] = loss_lr
+            loss = criterion(y_pred, y)
+            balanced_losses[loss_name] = loss
 
         # weighted losses
-        balanced_losses = {}
-        for k in balanced_losses_lr.keys():
-            balanced_losses[k] = (balanced_losses_sr[k] + balanced_losses_lr[k]) / 2
         metrics.update(balanced_losses)
         metrics.update(other_losses)
         metrics.update(qres.metrics)
@@ -173,7 +139,7 @@ class ComplexCompressionSolver(CompressionSolver):
 
             # balancer losses backward, returns effective training loss
             # with effective weights at the current batch.
-            metrics['g_loss'] = (self.balancer.backward(balanced_losses_lr, y_pred_lr) + self.balancer.backward(balanced_losses_sr, y_pred_sr)) / 2
+            metrics['g_loss'] = self.balancer.backward(balanced_losses, y_pred)
             # add metrics corresponding to weight ratios
             metrics.update(self.balancer.metrics)
             ratio2 = sum(p.grad.data.norm(p=2).pow(2)
@@ -194,7 +160,8 @@ class ComplexCompressionSolver(CompressionSolver):
         info_losses: dict = {}
         with torch.no_grad():
             for loss_name, criterion in self.info_losses.items():
-                info_losses[loss_name] = (criterion(y_pred_sr, y_sr) + criterion(y_pred_lr, y_lr)) / 2
+                loss = criterion(y_pred, y)
+                info_losses[loss_name] = loss
 
         metrics.update(info_losses)
 
@@ -224,43 +191,34 @@ class ComplexCompressionSolver(CompressionSolver):
 
         wandb_logger = self.get_wandb_logger()
         rows = []
-        columns = ["sample_name", "ref[16kHz]", "ref[8kHz]"]
-        if self.sr_params.super_res_prob == 0:
-            columns.append("pred_no_super_res[8kHz]")
-        else:
-            columns.append("pred_super_res[16kHz]")
-            
+        columns = ["sample_name", "noisy", "clean", "prediction"]
+        self.denoise_params.denoise_prob = 1
         with tempfile.TemporaryDirectory() as temp_dir:
             for batch in lp:
-                reference, _ = batch
-                reference = reference.to(self.device)
+                noisy, _, clean, _ = batch
+                noisy = noisy.to(self.device)
+                clean = clean.to(self.device)
                 with torch.no_grad():
-                    _, _, y_pred_lr, y_pred_sr, _ = self.run_model(reference, is_gen_or_eval=True)
-                reference = reference.cpu()
-                reference_downsample = julius.resample_frac(reference, self.sr_params.origin_sr, self.sr_params.target_sr)
+                    y, pred, qres = self.run_model(noisy, is_gen_or_eval=True, clean_data=clean)
+                noisy = noisy.cpu()
 
-                if self.sr_params.super_res_prob == 0:
-                    pred = y_pred_lr.cpu()
-                else:
-                    pred = y_pred_sr.cpu()
-
-                for sample_idx in range(len(reference)):
+                for sample_idx in range(len(noisy)):
                     sample_id = sample_manager._get_sample_id(sample_idx, None, None)
                     row = [sample_id]
 
-                    soundfile.write(file=f"{temp_dir}/{sample_id}_ref.wav",
-                                    data=reference[sample_idx].squeeze(),
+                    soundfile.write(file=f"{temp_dir}/{sample_id}_clean.wav",
+                                    data=clean[sample_idx].squeeze(),
                                     samplerate=self.cfg.model_conditions.super_res.origin_sr)
-                    soundfile.write(file=f"{temp_dir}/{sample_id}_ref_downsample.wav",
-                                    data=reference_downsample[sample_idx].squeeze(),
+                    soundfile.write(file=f"{temp_dir}/{sample_id}_noisy.wav",
+                                    data=noisy[sample_idx].squeeze(),
                                     samplerate=self.cfg.model_conditions.super_res.target_sr)
                     soundfile.write(file=f"{temp_dir}/{sample_id}_pred.wav",
                                     data=pred[sample_idx].squeeze(),
                                     samplerate=self.cfg.model_conditions.super_res.origin_sr)
 
-                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_ref.wav", self.cfg.model_conditions.super_res.origin_sr))
-                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_ref_downsample.wav", self.cfg.model_conditions.super_res.target_sr))
-                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_pred.wav", self.cfg.model_conditions.super_res.origin_sr))
+                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_clean.wav", self.cfg.sample_rate))
+                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_noisy.wav", self.cfg.sample_rate))
+                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_pred.wav", self.cfg.sample_rate))
 
                     rows.append(row)
             wandb_logger.writer.log({f"generate_epoch={self.epoch}": wandb.Table(columns=columns, data=rows)}, step=self.epoch)
@@ -280,17 +238,13 @@ class ComplexCompressionSolver(CompressionSolver):
         ctx = multiprocessing.get_context('spawn')
         with get_pool_executor(self.cfg.evaluate.num_workers, mp_context=ctx) as pool:
             for _, batch in enumerate(lp):
-                x = batch.to(self.device)
+                noisy, clean = batch
+                noisy = noisy.to(self.device)
+                clean = clean.to(self.device)
                 with torch.no_grad():
-                    y_lr, y_sr, y_pred_lr, y_pred_sr, _ = self.run_model(x, is_gen_or_eval=True)
-                if self.sr_params.super_res_prob == 0:
-                    pred = y_pred_lr.cpu()
-                    ref = y_lr.cpu()
-                else:
-                    pred = y_pred_sr.cpu()
-                    ref = y_sr.cpu()
+                    y, y_pred, qres = self.run_model(noisy, is_gen_or_eval=True, clean_data=clean)
 
-                pendings.append(pool.submit(evaluate_audio_reconstruction, pred, ref, self.cfg))
+                pendings.append(pool.submit(evaluate_audio_reconstruction, y_pred, y, self.cfg))
 
             metrics_lp = self.log_progress(f'{evaluate_stage_name} metrics', pendings, updates=self.log_updates)
             for pending in metrics_lp:
@@ -299,3 +253,7 @@ class ComplexCompressionSolver(CompressionSolver):
 
         metrics = flashy.distrib.average_metrics(metrics, len(loader))
         return metrics
+    
+    def build_dataloaders(self):
+        """Instantiate audio dataloaders for each stage."""
+        self.dataloaders = builders.get_audio_datasets(self.cfg, dataset_type=self.DATASET_TYPE)

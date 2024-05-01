@@ -3,7 +3,7 @@
 defaults:
   - compression/default
   - /model: encodec/complex_encodec
-  - override /dset: audio/valentini
+  - override /dset: audio/valentini_noisy_56spk
   - _self_
 
 solver: complex_compression
