@@ -246,7 +246,6 @@ class ComplexCompressionSolver(CompressionSolver):
         if not self.cfg.logging.log_wandb:
             logger.info("No generate without wandb.")
             return
-        assert self.sr_params.prob in [0, 1] and self.denoise_params.prob in [0, 1], "generate supports strict probability. set to 0 or 1"
 
         self.model.eval()
         sample_manager = SampleManager(self.xp, map_reference_to_sample_id=True)
@@ -258,43 +257,40 @@ class ComplexCompressionSolver(CompressionSolver):
 
         wandb_logger = self.get_wandb_logger()
         rows = []
-        columns = ["sample_name", "ref[16kHz]", "ref[8kHz]"]
-        if self.sr_params.prob == 0:
-            columns.append("pred_no_super_res[8kHz]")
-        else:
-            columns.append("pred_super_res[16kHz]")
-            
+        columns = ["sample_name", "ref", "pred", "target"]
         with tempfile.TemporaryDirectory() as temp_dir:
             for batch in lp:
                 noisy, _, clean, _ = batch
                 noisy = noisy.to(self.device)
                 clean = clean.to(self.device)
+                x = noisy if self.denoise_params.prob == 1 else clean
                 with torch.no_grad():
-                    _, _, y_pred_lr, y_pred_sr, _ = self.run_model(noisy, is_gen_or_eval=True, clean_data=clean)
-                noisy = noisy.cpu()
-                noisy_downsample = julius.resample_frac(noisy, self.sr_params.origin_sr, self.sr_params.target_sr)
-                if self.sr_params.prob == 0:
-                    pred = y_pred_lr.cpu()
-                else:
-                    pred = y_pred_sr.cpu()
+                    _, _, y_pred_lr, y_pred_sr, _ = self.run_model(x, is_gen_or_eval=True, clean_data=clean)
 
-                for sample_idx in range(len(noisy)):
+                noisy_downsample = julius.resample_frac(noisy, self.sr_params.origin_sr, self.sr_params.target_sr)
+                clean_downsample = julius.resample_frac(clean, self.sr_params.origin_sr, self.sr_params.target_sr)
+
+                model_input = noisy_downsample.cpu() if self.denoise_params.prob == 1 else clean_downsample.cpu()
+                model_output, target, sr = (y_pred_lr.cpu(), clean_downsample.cpu(), self.sr_params.target_sr) if self.sr_params.prob == 0 else (y_pred_sr.cpu(), clean.cpu(), self.sr_params.origin_sr)
+
+                for sample_idx in range(len(x)):
                     sample_id = sample_manager._get_sample_id(sample_idx, None, None)
                     row = [sample_id]
 
                     soundfile.write(file=f"{temp_dir}/{sample_id}_ref.wav",
-                                    data=noisy[sample_idx].squeeze(),
-                                    samplerate=self.cfg.model_conditions.super_res.origin_sr)
-                    soundfile.write(file=f"{temp_dir}/{sample_id}_ref_downsample.wav",
-                                    data=noisy_downsample[sample_idx].squeeze(),
-                                    samplerate=self.cfg.model_conditions.super_res.target_sr)
-                    soundfile.write(file=f"{temp_dir}/{sample_id}_pred.wav",
-                                    data=pred[sample_idx].squeeze(),
-                                    samplerate=self.cfg.model_conditions.super_res.origin_sr)
+                                    data=model_input[sample_idx].squeeze(),
+                                    samplerate=self.sr_params.target_sr)
 
-                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_ref.wav", self.cfg.model_conditions.super_res.origin_sr))
-                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_ref_downsample.wav", self.cfg.model_conditions.super_res.target_sr))
-                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_pred.wav", self.cfg.model_conditions.super_res.origin_sr))
+                    soundfile.write(file=f"{temp_dir}/{sample_id}_pred.wav",
+                                    data=model_output[sample_idx].squeeze(),
+                                    samplerate=sr)
+
+                    soundfile.write(file=f"{temp_dir}/{sample_id}_target.wav",
+                                    data=target[sample_idx].squeeze(),
+                                    samplerate=sr)
+                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_ref.wav", self.sr_params.target_sr))
+                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_pred.wav", sr))
+                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_target.wav", sr))
 
                     rows.append(row)
             wandb_logger.writer.log({f"generate_epoch={self.epoch}": wandb.Table(columns=columns, data=rows)}, step=self.epoch)
@@ -302,8 +298,6 @@ class ComplexCompressionSolver(CompressionSolver):
 
     def evaluate(self):
         """Evaluate stage. Runs audio reconstruction evaluation."""
-        assert self.sr_params.prob in [0, 1] and self.denoise_params.prob in [0, 1], "generate supports strict probability. set to 0 or 1"
-
         self.model.eval()
         evaluate_stage_name = str(self.current_stage)
 
@@ -319,14 +313,15 @@ class ComplexCompressionSolver(CompressionSolver):
                 noisy, clean = batch
                 noisy = noisy.to(self.device)
                 clean = clean.to(self.device)
+
+                x = noisy if self.denoise_params.prob == 1 else clean
+
                 with torch.no_grad():
-                    y_lr, y_sr, y_pred_lr, y_pred_sr, _ = self.run_model(noisy, is_gen_or_eval=True, clean_data=clean)
-                if self.sr_params.prob == 0:
-                    pred = y_pred_lr.cpu()
-                    ref = y_lr.cpu()
-                else:
-                    pred = y_pred_sr.cpu()
-                    ref = y_sr.cpu()
+                    _, _, y_pred_lr, y_pred_sr, _ = self.run_model(x, is_gen_or_eval=True, clean_data=clean)
+
+                clean_downsample = julius.resample_frac(clean, self.sr_params.origin_sr, self.sr_params.target_sr)
+
+                pred, ref = (y_pred_lr.cpu(), clean_downsample.cpu()) if self.sr_params.prob == 0 else (y_pred_sr.cpu(), clean.cpu())
 
                 pendings.append(pool.submit(evaluate_audio_reconstruction, pred, ref, self.cfg))
 
