@@ -12,6 +12,7 @@ from the Hydra config.
 from enum import Enum
 import logging
 import typing as tp
+from pesq import pesq as pesq_func
 
 import dora
 import flashy
@@ -312,6 +313,18 @@ def log_spectral_distance(y, y_pred):
     lsd = torch.sqrt(mse)
 
     return lsd
+
+
+def pesq(y_pred: torch.Tensor, y: torch.Tensor, cfg: omegaconf.DictConfig):
+    scores = []
+    for ind in range(len(y)):
+        try:
+            sample_score = pesq_func(fs=cfg.sample_rate, deg=y.squeeze().numpy()[ind], ref=y_pred.squeeze().numpy()[ind], mode="nb")
+            scores.append(sample_score)
+        except:
+            continue
+    pesq_score = torch.Tensor(scores)
+    return torch.mean(pesq_score)
 
 
 def get_audio_datasets(cfg: omegaconf.DictConfig,
