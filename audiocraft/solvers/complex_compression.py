@@ -248,89 +248,101 @@ class ComplexCompressionSolver(CompressionSolver):
             return
 
         self.model.eval()
-        sample_manager = SampleManager(self.xp, map_reference_to_sample_id=True)
-        generate_stage_name = str(self.current_stage)
+        for dn_bit in [0, 1]:
+            for sr_bit in [0, 1]:
+                logger.info(f"Running generation for dn_bit={dn_bit} sr_bit={sr_bit}")
+                self.denoise_params.prob = dn_bit
+                self.sr_params.prob = sr_bit
+                sample_manager = SampleManager(self.xp, map_reference_to_sample_id=True)
+                generate_stage_name = str(self.current_stage)
 
-        loader = self.dataloaders['generate']
-        updates = len(loader)
-        lp = self.log_progress(generate_stage_name, loader, total=updates, updates=self.log_updates)
+                loader = self.dataloaders['generate']
+                updates = len(loader)
+                lp = self.log_progress(generate_stage_name, loader, total=updates, updates=self.log_updates)
 
-        wandb_logger = self.get_wandb_logger()
-        rows = []
-        columns = ["sample_name", "ref", "pred", "target"]
-        with tempfile.TemporaryDirectory() as temp_dir:
-            for batch in lp:
-                noisy, _, clean, _ = batch
-                noisy = noisy.to(self.device)
-                clean = clean.to(self.device)
-                x = noisy if self.denoise_params.prob == 1 else clean
-                with torch.no_grad():
-                    _, _, y_pred_lr, y_pred_sr, _ = self.run_model(x, is_gen_or_eval=True, clean_data=clean)
+                wandb_logger = self.get_wandb_logger()
+                rows = []
+                columns = ["sample_name", "ref", "pred", "target"]
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    for batch in lp:
+                        noisy, _, clean, _ = batch
+                        noisy = noisy.to(self.device)
+                        clean = clean.to(self.device)
+                        x = noisy if self.denoise_params.prob == 1 else clean
+                        with torch.no_grad():
+                            _, _, y_pred_lr, y_pred_sr, _ = self.run_model(x, is_gen_or_eval=True, clean_data=clean)
 
-                noisy_downsample = julius.resample_frac(noisy, self.sr_params.origin_sr, self.sr_params.target_sr)
-                clean_downsample = julius.resample_frac(clean, self.sr_params.origin_sr, self.sr_params.target_sr)
+                        noisy_downsample = julius.resample_frac(noisy, self.sr_params.origin_sr, self.sr_params.target_sr)
+                        clean_downsample = julius.resample_frac(clean, self.sr_params.origin_sr, self.sr_params.target_sr)
 
-                model_input = noisy_downsample.cpu() if self.denoise_params.prob == 1 else clean_downsample.cpu()
-                model_output, target, sr = (y_pred_lr.cpu(), clean_downsample.cpu(), self.sr_params.target_sr) if self.sr_params.prob == 0 else (y_pred_sr.cpu(), clean.cpu(), self.sr_params.origin_sr)
+                        model_input = noisy_downsample.cpu() if self.denoise_params.prob == 1 else clean_downsample.cpu()
+                        model_output, target, sr = (y_pred_lr.cpu(), clean_downsample.cpu(), self.sr_params.target_sr) if self.sr_params.prob == 0 else (y_pred_sr.cpu(), clean.cpu(), self.sr_params.origin_sr)
 
-                for sample_idx in range(len(x)):
-                    sample_id = sample_manager._get_sample_id(sample_idx, None, None)
-                    row = [sample_id]
+                        for sample_idx in range(len(x)):
+                            sample_id = sample_manager._get_sample_id(sample_idx, None, None)
+                            row = [sample_id]
 
-                    soundfile.write(file=f"{temp_dir}/{sample_id}_ref.wav",
-                                    data=model_input[sample_idx].squeeze(),
-                                    samplerate=self.sr_params.target_sr)
+                            soundfile.write(file=f"{temp_dir}/{sample_id}_ref.wav",
+                                            data=model_input[sample_idx].squeeze(),
+                                            samplerate=self.sr_params.target_sr)
 
-                    soundfile.write(file=f"{temp_dir}/{sample_id}_pred.wav",
-                                    data=model_output[sample_idx].squeeze(),
-                                    samplerate=sr)
+                            soundfile.write(file=f"{temp_dir}/{sample_id}_pred.wav",
+                                            data=model_output[sample_idx].squeeze(),
+                                            samplerate=sr)
 
-                    soundfile.write(file=f"{temp_dir}/{sample_id}_target.wav",
-                                    data=target[sample_idx].squeeze(),
-                                    samplerate=sr)
-                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_ref.wav", self.sr_params.target_sr))
-                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_pred.wav", sr))
-                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_target.wav", sr))
+                            soundfile.write(file=f"{temp_dir}/{sample_id}_target.wav",
+                                            data=target[sample_idx].squeeze(),
+                                            samplerate=sr)
+                            row.append(wandb.Audio(f"{temp_dir}/{sample_id}_ref.wav", self.sr_params.target_sr))
+                            row.append(wandb.Audio(f"{temp_dir}/{sample_id}_pred.wav", sr))
+                            row.append(wandb.Audio(f"{temp_dir}/{sample_id}_target.wav", sr))
 
-                    rows.append(row)
-            wandb_logger.writer.log({f"generate_epoch={self.epoch}": wandb.Table(columns=columns, data=rows)}, step=self.epoch)
+                            rows.append(row)
+                    wandb_logger.writer.log({f"generation dn_bit={dn_bit}_sr_bit={sr_bit}": wandb.Table(columns=columns, data=rows)}, step=self.epoch)
         flashy.distrib.barrier()
 
     def evaluate(self):
         """Evaluate stage. Runs audio reconstruction evaluation."""
         self.model.eval()
         evaluate_stage_name = str(self.current_stage)
+        full_metrics = {}
+        for dn_bit in [0, 1]:
+            for sr_bit in [0, 1]:
+                logger.info(f"Running evaluation for dn_bit={dn_bit} sr_bit={sr_bit}")
+                self.denoise_params.prob = dn_bit
+                self.sr_params.prob = sr_bit
+                loader = self.dataloaders['evaluate']
+                updates = len(loader)
+                lp = self.log_progress(f'{evaluate_stage_name} inference', loader, total=updates, updates=self.log_updates)
+                average = flashy.averager()
+                wandb_logger = self.get_wandb_logger()
+                pendings = []
+                ctx = multiprocessing.get_context('spawn')
 
-        loader = self.dataloaders['evaluate']
-        updates = len(loader)
-        lp = self.log_progress(f'{evaluate_stage_name} inference', loader, total=updates, updates=self.log_updates)
-        average = flashy.averager()
+                with get_pool_executor(self.cfg.evaluate.num_workers, mp_context=ctx) as pool:
+                    for _, batch in enumerate(lp):
+                        noisy, clean = batch
+                        noisy = noisy.to(self.device)
+                        clean = clean.to(self.device)
+                        x = noisy if self.denoise_params.prob == 1 else clean
+                        with torch.no_grad():
+                            _, _, y_pred_lr, y_pred_sr, _ = self.run_model(x, is_gen_or_eval=True, clean_data=clean)
+                        clean_downsample = julius.resample_frac(clean, self.sr_params.origin_sr, self.sr_params.target_sr)
+                        pred, ref = (y_pred_lr.cpu(), clean_downsample.cpu()) if self.sr_params.prob == 0 else (y_pred_sr.cpu(), clean.cpu())
+                        pendings.append(pool.submit(evaluate_audio_reconstruction, pred, ref, self.cfg))
 
-        pendings = []
-        ctx = multiprocessing.get_context('spawn')
-        with get_pool_executor(self.cfg.evaluate.num_workers, mp_context=ctx) as pool:
-            for _, batch in enumerate(lp):
-                noisy, clean = batch
-                noisy = noisy.to(self.device)
-                clean = clean.to(self.device)
+                    metrics_lp = self.log_progress(f'{evaluate_stage_name} metrics', pendings, updates=self.log_updates)
+                    for pending in metrics_lp:
+                        metrics = pending.result()
+                        metrics = average(metrics)
 
-                x = noisy if self.denoise_params.prob == 1 else clean
-
-                with torch.no_grad():
-                    _, _, y_pred_lr, y_pred_sr, _ = self.run_model(x, is_gen_or_eval=True, clean_data=clean)
-
-                clean_downsample = julius.resample_frac(clean, self.sr_params.origin_sr, self.sr_params.target_sr)
-
-                pred, ref = (y_pred_lr.cpu(), clean_downsample.cpu()) if self.sr_params.prob == 0 else (y_pred_sr.cpu(), clean.cpu())
-
-                pendings.append(pool.submit(evaluate_audio_reconstruction, pred, ref, self.cfg))
-
-            metrics_lp = self.log_progress(f'{evaluate_stage_name} metrics', pendings, updates=self.log_updates)
-            for pending in metrics_lp:
-                metrics = pending.result()
-                metrics = average(metrics)
-
-        metrics = flashy.distrib.average_metrics(metrics, len(loader))
+                metrics = flashy.distrib.average_metrics(metrics, len(loader))
+                full_metrics[f"dn_bit={dn_bit}_sr_bit={sr_bit}"] = metrics
+        print(full_metrics)
+        for k in metrics.keys():
+            rows = [[full_metrics[f"dn_bit=0_sr_bit=0"][k], full_metrics[f"dn_bit=0_sr_bit=1"][k], full_metrics[f"dn_bit=1_sr_bit=0"][k], full_metrics[f"dn_bit=1_sr_bit=1"][k]]]
+            columns = ["dn_bit=0_sr_bit=0", "dn_bit=0_sr_bit=1", "dn_bit=1_sr_bit=0", "dn_bit=1_sr_bit=1"]
+            wandb_logger.writer.log({f"metric={k}": wandb.Table(columns=columns, data=rows)}, step=self.epoch)
         return metrics
     
     def build_dataloaders(self):

@@ -35,8 +35,8 @@ dataset:
     num_samples: 824
   generate:
     batch_size: 32
-    num_samples: 10
-    segment_duration: 2
+    num_samples: 40
+    segment_duration: 4
 
 evaluate:
   every: 10
