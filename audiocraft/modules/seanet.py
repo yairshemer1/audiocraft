@@ -200,6 +200,30 @@ class SEANetEncoder(nn.Module):
         return self.model(x)
 
 
+class EncoderBlock2d(nn.Module):
+    def __init__(self, act, ratio, n_residual_layers, ch_in, ch_out, residual_kernel_size, dilation_base, block_norm, norm_params, activation, activation_params, causal, pad_mode, compress, true_skip):
+        super().__init__()
+        model = []
+        for j in range(n_residual_layers):
+            model += [
+                SEANetResnetBlock2d(ch_in, kernel_sizes=[residual_kernel_size, 1],
+                                    dilations=[dilation_base ** j, 1],
+                                    norm=block_norm, norm_params=norm_params,
+                                    activation=activation, activation_params=activation_params,
+                                    causal=causal, pad_mode=pad_mode, compress=compress, true_skip=true_skip)]
+
+            # Add downsampling layers
+            model += [
+                act(**activation_params),
+                StreamableConv2d(ch_in, ch_out,
+                                 kernel_size=ratio * 2, stride=ratio,
+                                 norm=block_norm, norm_kwargs=norm_params,
+                                 causal=causal, pad_mode=pad_mode),
+            ]
+        
+        self.model = nn.Sequential(*model)
+
+
 class SEANetEncoder2d(nn.Module):
     """SEANet encoder.
 
@@ -233,8 +257,13 @@ class SEANetEncoder2d(nn.Module):
                  norm: str = 'none', norm_params: tp.Dict[str, tp.Any] = {}, kernel_size: int = 7,
                  last_kernel_size: int = 7, residual_kernel_size: int = 3, dilation_base: int = 2, causal: bool = False,
                  pad_mode: str = 'reflect', true_skip: bool = True, compress: int = 2, lstm: int = 0,
-                 disable_norm_outer_blocks: int = 0, frequency_bins: int = 512):
+                 disable_norm_outer_blocks: int = 0, 
+                 frequency_bins: int = 512, 
+                 num_1x1_convolutions: int = 2,
+                 temporal_ratios: tp.List[int] = [2]):
         super().__init__()
+        self.num_1x1_convolutions = num_1x1_convolutions
+        self.temporal_ratios = temporal_ratios
         self.channels = channels
         self.dimension = dimension
         self.n_filters = n_filters
@@ -251,19 +280,22 @@ class SEANetEncoder2d(nn.Module):
             "It should be lower or equal to the actual number of blocks in the network and greater or equal to 0."
 
         act = getattr(nn, activation)
-        mult = 1
+
+        chnls = n_filters
+        freq_bins = frequency_bins
+
         model: tp.List[nn.Module] = [
-            StreamableConv2d(2, mult * n_filters, kernel_size,
+            StreamableConv2d(2, chnls, kernel_size,
                              norm='none' if self.disable_norm_outer_blocks >= 1 else norm,
                              norm_kwargs=norm_params, causal=causal, pad_mode=pad_mode)
         ]
-        # Downsample to raw audio scale
+        # Take strides accross frequency dimension
         for i, ratio in enumerate(self.ratios):
             block_norm = 'none' if self.disable_norm_outer_blocks >= i + 2 else norm
             # Add residual layers
             for j in range(n_residual_layers):
                 model += [
-                    SEANetResnetBlock2d(mult * n_filters, kernel_sizes=[residual_kernel_size, 1],
+                    SEANetResnetBlock2d(chnls, kernel_sizes=[residual_kernel_size, 1],
                                         dilations=[dilation_base ** j, 1],
                                         norm=block_norm, norm_params=norm_params,
                                         activation=activation, activation_params=activation_params,
@@ -272,27 +304,74 @@ class SEANetEncoder2d(nn.Module):
             # Add downsampling layers
             model += [
                 act(**activation_params),
-                StreamableConv2d(mult * n_filters, mult * n_filters * 2,
+                StreamableConv2d(chnls, chnls * 2,
                                  kernel_size=ratio * 2, stride=ratio,
                                  norm=block_norm, norm_kwargs=norm_params,
                                  causal=causal, pad_mode=pad_mode),
             ]
-            mult *= 2
+            chnls *= 2
+            freq_bins //= 2
 
+        # decrease channels using 1x1 convolutions
+        for _ in range(self.num_1x1_convolutions):
+            for _ in range(n_residual_layers):
+                model += [
+                    SEANetResnetBlock2d(chnls, kernel_sizes=[1, 1],
+                                        dilations=[1, 1],
+                                        norm=block_norm, norm_params=norm_params,
+                                        activation=activation, activation_params=activation_params,
+                                        causal=causal, pad_mode=pad_mode, compress=compress, true_skip=true_skip)]
+
+            # Add downsampling layers
+            model += [
+                act(**activation_params),
+                StreamableConv2d(chnls, chnls // 2,
+                                 kernel_size=1, stride=1,
+                                 norm=block_norm, norm_kwargs=norm_params,
+                                 causal=causal, pad_mode=pad_mode),
+            ]
+            chnls //= 2
+
+        # flatten: results in output shape of (B, chnsl * freq_bins, T)
         model += [nn.Flatten(1, 2)]
-        freq_channels = int(self.frequency_bins // self.hop_length)
+        flattened_dim = chnls * freq_bins
+
+        # force desired latent size
         model += [
             act(**activation_params),
-            StreamableConv1d(mult * n_filters * freq_channels, mult * n_filters, last_kernel_size,
+            StreamableConv1d(flattened_dim, dimension, 1,
                              norm='none' if self.disable_norm_outer_blocks == self.n_blocks else norm,
                              norm_kwargs=norm_params, causal=causal, pad_mode=pad_mode)
         ]
+
+        # take temporal strides
+        if len(self.temporal_ratios) > 0:
+            for i, ratio in enumerate(self.temporal_ratios):
+                block_norm = 'none' if self.disable_norm_outer_blocks >= i + 2 else norm
+                # Add residual layers
+                for j in range(n_residual_layers):
+                    model += [
+                        SEANetResnetBlock(dimension, kernel_sizes=[3, 1],
+                                        dilations=[1, 1],
+                                        norm=block_norm, norm_params=norm_params,
+                                        activation=activation, activation_params=activation_params,
+                                        causal=causal, pad_mode=pad_mode, compress=compress, true_skip=true_skip)]
+
+                # Add downsampling layers
+                model += [
+                    act(**activation_params),
+                    StreamableConv1d(dimension,dimension,
+                                    kernel_size=ratio * 2, stride=ratio,
+                                    norm=block_norm, norm_kwargs=norm_params,
+                                    causal=causal, pad_mode=pad_mode),
+                ]
+
         if lstm:
-            model += [StreamableLSTM(mult * n_filters, num_layers=lstm)]
+            model += [StreamableLSTM(dimension, num_layers=lstm)]
 
         model += [
             act(**activation_params),
-            StreamableConv1d(mult * n_filters, dimension, last_kernel_size,
+            StreamableConv1d(dimension, dimension, last_kernel_size,
                              norm='none' if self.disable_norm_outer_blocks == self.n_blocks else norm,
                              norm_kwargs=norm_params, causal=causal, pad_mode=pad_mode)
         ]
@@ -444,8 +523,12 @@ class SEANetDecoder2d(nn.Module):
                  norm: str = 'none', norm_params: tp.Dict[str, tp.Any] = {}, kernel_size: int = 7,
                  last_kernel_size: int = 7, residual_kernel_size: int = 3, dilation_base: int = 2, causal: bool = False,
                  pad_mode: str = 'reflect', true_skip: bool = True, compress: int = 2, lstm: int = 0,
-                 disable_norm_outer_blocks: int = 0, trim_right_ratio: float = 1.0, frequency_bins: int = 512):
+                 disable_norm_outer_blocks: int = 0, trim_right_ratio: float = 1.0, frequency_bins: int = 512, 
+                 num_1x1_convolutions: int = 2,
+                 temporal_ratios: tp.List[int] = [2]):
         super().__init__()
+        self.num_1x1_convolutions = num_1x1_convolutions
+        self.temporal_ratios = temporal_ratios
         self.dimension = dimension
         self.channels = channels
         self.n_filters = n_filters
@@ -460,25 +543,69 @@ class SEANetDecoder2d(nn.Module):
         assert self.disable_norm_outer_blocks >= 0 and self.disable_norm_outer_blocks <= self.n_blocks, \
             "Number of blocks for which to disable norm is invalid." \
             "It should be lower or equal to the actual number of blocks in the network and greater or equal to 0."
-
         act = getattr(nn, activation)
         mult = int(2 ** len(self.ratios))
         model: tp.List[nn.Module] = [
-            StreamableConv1d(dimension, mult * n_filters, kernel_size,
+            StreamableConv1d(dimension, dimension, kernel_size,
                              norm='none' if self.disable_norm_outer_blocks == self.n_blocks else norm,
                              norm_kwargs=norm_params, causal=causal, pad_mode=pad_mode)
         ]
+                
 
         if lstm:
-            model += [StreamableLSTM(mult * n_filters, num_layers=lstm)]
+            model += [StreamableLSTM(dimension, num_layers=lstm)]
 
-        freq_channels = int(self.frequency_bins // self.hop_length)
+        # reverse temporal strides 
+        if len(temporal_ratios) > 0:
+            for i, ratio in enumerate(self.temporal_ratios):
+                block_norm = 'none' if self.disable_norm_outer_blocks >= self.n_blocks - (i + 1) else norm
+                # Add upsampling layers
+                model += [
+                    act(**activation_params),
+                    StreamableConvTranspose1d(dimension, dimension,
+                                            kernel_size=ratio * 2, stride=ratio,
+                                            norm=block_norm, norm_kwargs=norm_params,
+                                            causal=causal, trim_right_ratio=trim_right_ratio),
+                ]
+                # Add residual layers
+                for _ in range(n_residual_layers):
+                    model += [
+                        SEANetResnetBlock(dimension, kernel_sizes=[3, 1],
+                                        dilations=[1, 1],
+                                        activation=activation, activation_params=activation_params,
+                                        norm=block_norm, norm_params=norm_params, causal=causal,
+                                        pad_mode=pad_mode, compress=compress, true_skip=true_skip)]
+
+        chnls = n_filters * (2 ** (len(self.ratios) - self.num_1x1_convolutions))
+        freq_bins = frequency_bins // np.product(self.ratios)
+        
+
         model += [
-            StreamableConv1d(mult * n_filters, mult * n_filters * freq_channels, kernel_size,
+            StreamableConv1d(dimension, chnls * freq_bins, kernel_size,
                              norm='none' if self.disable_norm_outer_blocks == self.n_blocks else norm,
                              norm_kwargs=norm_params, causal=causal, pad_mode=pad_mode)
         ]
-        model += [nn.Unflatten(1, (mult * n_filters, freq_channels))]
+        model += [nn.Unflatten(1, (int(chnls), int(freq_bins)))]
+
+        # scale channels using 1x1 convolutions
+        for _ in range(self.num_1x1_convolutions):
+            for _ in range(n_residual_layers):
+                model += [
+                    SEANetResnetBlock2d(chnls, kernel_sizes=[1, 1],
+                                        dilations=[1, 1],
+                                        norm=block_norm, norm_params=norm_params,
+                                        activation=activation, activation_params=activation_params,
+                                        causal=causal, pad_mode=pad_mode, compress=compress, true_skip=true_skip)]
+
+            # Add downsampling layers
+            model += [
+                act(**activation_params),
+                StreamableConv2d(chnls, chnls * 2,
+                                 kernel_size=1, stride=1,
+                                 norm=block_norm, norm_kwargs=norm_params,
+                                 causal=causal, pad_mode=pad_mode),
+            ]
+            chnls *= 2
 
         # Upsample to raw audio scale
         for i, ratio in enumerate(self.ratios):
@@ -486,7 +613,7 @@ class SEANetDecoder2d(nn.Module):
             # Add upsampling layers
             model += [
                 act(**activation_params),
-                StreamableConvTranspose2d(mult * n_filters, mult * n_filters // 2,
+                StreamableConvTranspose2d(chnls, chnls // 2,
                                           kernel_size=ratio * 2, stride=ratio,
                                           norm=block_norm, norm_kwargs=norm_params,
                                           causal=causal, trim_right_ratio=trim_right_ratio),
@@ -494,13 +621,13 @@ class SEANetDecoder2d(nn.Module):
             # Add residual layers
             for j in range(n_residual_layers):
                 model += [
-                    SEANetResnetBlock2d(mult * n_filters // 2, kernel_sizes=[residual_kernel_size, 1],
+                    SEANetResnetBlock2d(chnls // 2, kernel_sizes=[residual_kernel_size, 1],
                                         dilations=[dilation_base ** j, 1],
                                         activation=activation, activation_params=activation_params,
                                         norm=block_norm, norm_params=norm_params, causal=causal,
                                         pad_mode=pad_mode, compress=compress, true_skip=true_skip)]
 
-            mult //= 2
+            chnls //= 2
 
         # Add final layers
         model += [

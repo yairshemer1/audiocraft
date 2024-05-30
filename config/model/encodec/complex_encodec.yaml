@@ -24,6 +24,8 @@ data_preprocess:
 seanet:
   n_filters: 48
   ratios: [4, 2, 2]
+  temporal_ratios: [2]
+  last_kernel_size: 3
 
 rvq:
   bins: 2048
