@@ -88,7 +88,7 @@ class ComplexCompressionSolver(CompressionSolver):
         T_new = x_downsampled.shape[-1]
         x_stft = torch.stft(x_downsampled.view(-1, T_new),
                             n_fft=self.preprocess_params.n_fft,
-                            hop_length=self.preprocess_params.hop_length // 2,
+                            hop_length=(self.preprocess_params.hop_length // 2) + 1,
                             win_length=self.preprocess_params.win_length,
                             normalized=self.preprocess_params.normalized,
                             return_complex=False)
@@ -309,8 +309,8 @@ class ComplexCompressionSolver(CompressionSolver):
         for dn_bit in [0, 1]:
             for sr_bit in [0, 1]:
                 logger.info(f"Running evaluation for dn_bit={dn_bit} sr_bit={sr_bit}")
-                self.denoise_params.prob = dn_bit
-                self.sr_params.prob = sr_bit
+                self.cfg.model_conditions.denoise.prob = self.denoise_params.prob = dn_bit
+                self.cfg.model_conditions.super_res.prob = self.sr_params.prob = sr_bit
                 loader = self.dataloaders['evaluate']
                 updates = len(loader)
                 lp = self.log_progress(f'{evaluate_stage_name} inference', loader, total=updates, updates=self.log_updates)

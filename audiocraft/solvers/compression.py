@@ -354,13 +354,20 @@ class CompressionSolver(base.StandardSolver):
 def evaluate_audio_reconstruction(y_pred: torch.Tensor, y: torch.Tensor, cfg: omegaconf.DictConfig) -> dict:
     """Audio reconstruction evaluation method that can be conveniently pickled."""
     metrics = {}
+
+    # fix sample rate if no SR is done
+    model_conds = cfg.get('model_conditions', None)
+    if model_conds is not None and "super_res" in model_conds and model_conds["super_res"]["prob"] == 0:
+        cfg.sample_rate = model_conds["super_res"]["target_sr"]
+
     if cfg.evaluate.metrics.visqol:
         visqol = builders.get_visqol(cfg.metrics.visqol)
         metrics['visqol'] = visqol(y_pred, y, cfg.sample_rate)
     if cfg.evaluate.metrics.pesq:
         metrics['pesq'] = builders.pesq(y_pred=y_pred, y=y, cfg=cfg)
     if cfg.evaluate.metrics.lsd:
-        metrics['lsd'] = builders.log_spectral_distance(y=y.squeeze(), y_pred=y_pred.squeeze())
+        metrics['lsd'] = builders.get_lsd(y=y.squeeze(), y_pred=y_pred.squeeze())
+    metrics['stoi'] = builders.stoi(y_pred, y, cfg)
     sisnr = builders.get_loss('sisnr', cfg)
     metrics['mse'] = torch.nn.functional.mse_loss(y_pred, y)
     metrics['sisnr'] = sisnr(y_pred, y)
