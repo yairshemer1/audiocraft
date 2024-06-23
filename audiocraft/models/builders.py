@@ -17,6 +17,7 @@ import torch
 
 from .encodec import CompressionModel, EncodecModel
 from .complex_encodec import ComplexEncodecModel
+from .denoise_encodec import DenoiseEncodecModel
 from .lm import LMModel
 from ..modules.codebooks_patterns import (
     CodebooksPatternProvider,
@@ -87,6 +88,9 @@ def get_compression_model(cfg: omegaconf.DictConfig) -> CompressionModel:
         kwargs.pop('renorm', None)
         if is_complex:
             encodec_klass = ComplexEncodecModel
+            kwargs['num_conditions'] = len(cfg.model_conditions)
+        elif not is_complex and len(cfg.model_conditions) > 0:
+            encodec_klass = DenoiseEncodecModel
             kwargs['num_conditions'] = len(cfg.model_conditions)
         else:
             encodec_klass = EncodecModel
