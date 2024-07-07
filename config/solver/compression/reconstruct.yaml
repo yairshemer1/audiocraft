@@ -44,4 +44,4 @@ generate:
   every: 10
 optim:
   epochs: 500
-  updates_per_epoch: 400
+  updates_per_epoch: 1000

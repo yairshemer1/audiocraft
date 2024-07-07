@@ -243,7 +243,8 @@ class ComplexCompressionSolver(CompressionSolver):
                 clean = clean.to(self.device)
                 with torch.no_grad():
                     y, y_pred, qres = self.run_model(noisy, is_gen_or_eval=True, clean_data=clean)
-
+                y = y.cpu()
+                y_pred = y_pred.cpu()
                 pendings.append(pool.submit(evaluate_audio_reconstruction, y_pred, y, self.cfg))
 
             metrics_lp = self.log_progress(f'{evaluate_stage_name} metrics', pendings, updates=self.log_updates)

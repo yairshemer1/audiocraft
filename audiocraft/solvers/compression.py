@@ -358,11 +358,10 @@ def evaluate_audio_reconstruction(y_pred: torch.Tensor, y: torch.Tensor, cfg: om
         visqol = builders.get_visqol(cfg.metrics.visqol)
         metrics['visqol'] = visqol(y_pred, y, cfg.sample_rate)
     if cfg.evaluate.metrics.pesq:
-        from pesq import pesq_batch
-        pesq_score = torch.Tensor(pesq_batch(fs=cfg.sample_rate, deg=y.squeeze().numpy(), ref=y_pred.squeeze().numpy(), mode="nb"))
-        metrics['pesq'] = torch.mean(pesq_score)
+        metrics['pesq'] = builders.pesq(y_pred=y_pred, y=y, cfg=cfg)
     if cfg.evaluate.metrics.lsd:
-        metrics['lsd'] = builders.log_spectral_distance(y=y.squeeze(), y_pred=y_pred.squeeze())
+        metrics['lsd'] = builders.get_lsd(y=y.squeeze(), y_pred=y_pred.squeeze())
+    metrics['stoi'] = builders.stoi(y_pred, y, cfg)
     sisnr = builders.get_loss('sisnr', cfg)
     metrics['mse'] = torch.nn.functional.mse_loss(y_pred, y)
     metrics['sisnr'] = sisnr(y_pred, y)

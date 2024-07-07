@@ -69,7 +69,7 @@ evaluate:
   fixed_generation_duration: null  # in secs
   metrics:
     base: true
-    pesq: false
+    pesq: true
     lsd: true
 
 optim:

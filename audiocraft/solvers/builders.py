@@ -12,6 +12,8 @@ from the Hydra config.
 from enum import Enum
 import logging
 import typing as tp
+from pesq import pesq as pesq_func
+from pystoi import stoi as stoi_func
 
 import dora
 import flashy
@@ -285,33 +287,63 @@ def get_chroma_cosine_similarity(cfg: omegaconf.DictConfig) -> metrics.ChromaCos
     return metrics.ChromaCosineSimilarityMetric(**kwargs)
 
 
-def log_spectral_distance(y, y_pred):
+class STFTMag(nn.Module):
+    def __init__(self,
+                 nfft=1024,
+                 hop=256):
+        super().__init__()
+        self.nfft = nfft
+        self.hop = hop
+        self.register_buffer('window', torch.hann_window(nfft), False)
+
+    # x: [B,T] or [T]
+    @torch.no_grad()
+    def forward(self, x):
+        T = x.shape[-1]
+        stft = torch.stft(x,
+                          self.nfft,
+                          self.hop,
+                          window=self.window,
+                          return_complex=False,
+                          )
+        mag = torch.norm(stft, p=2, dim=-1)
+        return mag
+
+
+# taken from: https://github.com/nanahou/metric/blob/master/measure_SNR_LSD.py
+def get_lsd(y, y_pred):
     """
-    Calculates the log spectral distance (LSD) between two batches of waveforms using torch.stft.
-
-    Args:
-      y: A torch tensor of shape (num_waveforms, waveform_length) containing the first batch of waveforms.
-      y_pred: A torch tensor of shape (num_waveforms, waveform_length) containing the second batch of waveforms.
-
-    Returns:
-      A torch tensor of shape (num_waveforms,) containing the LSD between each corresponding waveform in the batches.
+       Compute LSD (log spectral distance)
+       Arguments:
+           y_pred: vector (torch.Tensor), enhanced signal [B,T]
+           y: vector (torch.Tensor), reference signal(ground truth) [B,T]
     """
-    spec_y = torch.stft(y, n_fft=1024, hop_length=256, win_length=1024, normalized=False, return_complex=True)
-    spec_y_pred = torch.stft(y_pred, n_fft=1024, hop_length=256, win_length=1024, normalized=False, return_complex=True)
-    epsilon = 1e-8
-    mag_y = torch.abs(spec_y) + epsilon
-    mag_y_pred = torch.abs(spec_y_pred) + epsilon
 
-    log_mag_y = torch.log10(mag_y)
-    log_mag_y_pred = torch.log10(mag_y_pred)
+    stft = STFTMag(2048, 512)
+    sp = torch.log10(stft(y).square().clamp(1e-8))
+    st = torch.log10(stft(y_pred).square().clamp(1e-8))
+    return (sp - st).square().mean(dim=1).sqrt().mean()
 
-    diff = torch.pow(log_mag_y - log_mag_y_pred, 2)
 
-    mse = torch.mean(diff)
+def pesq(y_pred: torch.Tensor, y: torch.Tensor, cfg: omegaconf.DictConfig):
+    scores = []
+    for ind in range(len(y)):
+        try:
+            sample_score = pesq_func(fs=cfg.sample_rate, deg=y.squeeze().numpy()[ind], ref=y_pred.squeeze().numpy()[ind], mode="nb")
+            scores.append(sample_score)
+        except:
+            continue
+    pesq_score = torch.Tensor(scores)
+    return torch.mean(pesq_score)
 
-    lsd = torch.sqrt(mse)
 
-    return lsd
+def stoi(y_pred: torch.Tensor, y: torch.Tensor, cfg: omegaconf.DictConfig):
+    scores = []
+    for ind in range(len(y)):
+        sample_score = stoi_func(x=y.squeeze().numpy()[ind], y=y_pred.squeeze().numpy()[ind], fs_sig=cfg.sample_rate, extended=True)
+        scores.append(sample_score)
+    stoi_score = torch.Tensor(scores)
+    return torch.mean(stoi_score)
 
 
 def get_audio_datasets(cfg: omegaconf.DictConfig,
