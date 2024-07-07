@@ -1,0 +1,32 @@
+# @package __global__
+
+defaults:
+  - encodec/default
+
+encodec:
+  is_complex: true
+
+model_conditions:
+  super_res:
+    prob: 0.5
+    origin_sr: ${sample_rate}
+    target_sr: 8000
+  denoise:
+    prob: 0.5
+    # augments here
+    
+data_preprocess:
+  n_fft: 1023
+  hop_length: 250 # n_fft // 4
+  win_length: 1023 # n_fft
+  normalized: false
+
+seanet:
+  n_filters: 48
+  ratios: [4, 2, 2]
+  temporal_ratios: []
+
+rvq:
+  bins: 2048
+  n_q: 4
+  q_dropout: false

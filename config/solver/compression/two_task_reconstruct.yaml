@@ -3,13 +3,14 @@
 defaults:
   - compression/default
   - /model: encodec/complex_encodec
-  - override /dset: audio/debug_noisy
+  - override /dset: audio/valentini_noisy_56spk
   - _self_
 
 solver: complex_compression
 
 channels: 1
 sample_rate: 16000
+
 
 logging:
   level: INFO
@@ -22,25 +23,25 @@ wandb:
   name:  # optional name for the experiment
   group:  # optional group
 
-
-# very small dataset
 dataset:
-  batch_size: 1
+  batch_size: 32
   num_workers: 10
   segment_duration: 1
   valid:
-    num_samples: 10
+    batch_size: 32
+    num_samples: 768
   evaluate:
-    num_samples: 10
+    batch_size: 32
+    num_samples: 824
   generate:
-    num_samples: 2
-    segment_duration: 2
+    batch_size: 32
+    num_samples: 40
+    segment_duration: 4
 
-# limited training
 evaluate:
-  every: 1
+  every: 10
 generate:
-  every: 1
+  every: 10
 optim:
-  epochs: 50
+  epochs: 500
   updates_per_epoch: 1000

@@ -1,0 +1,17 @@
+# @package __global__
+
+defaults:
+  - encodec/default
+
+
+model_conditions:
+  denoise:
+    prob: 0.5
+    # augments here
+    
+rvq:
+  bins: 2048
+  n_q: 4
+
+seanet:
+  n_filters: 64

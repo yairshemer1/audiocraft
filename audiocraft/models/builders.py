@@ -16,6 +16,8 @@ import omegaconf
 import torch
 
 from .encodec import CompressionModel, EncodecModel
+from .complex_encodec import ComplexEncodecModel
+from .denoise_encodec import DenoiseEncodecModel
 from .lm import LMModel
 from ..modules.codebooks_patterns import (
     CodebooksPatternProvider,
@@ -51,15 +53,21 @@ def get_quantizer(quantizer: str, cfg: omegaconf.DictConfig, dimension: int) -> 
     return klass(**kwargs)
 
 
-def get_encodec_autoencoder(encoder_name: str, cfg: omegaconf.DictConfig):
+def get_encodec_autoencoder(encoder_name: str, cfg: omegaconf.DictConfig, is_complex: bool = False):
     if encoder_name == 'seanet':
         kwargs = dict_from_config(getattr(cfg, 'seanet'))
         encoder_override_kwargs = kwargs.pop('encoder')
         decoder_override_kwargs = kwargs.pop('decoder')
         encoder_kwargs = {**kwargs, **encoder_override_kwargs}
         decoder_kwargs = {**kwargs, **decoder_override_kwargs}
-        encoder = audiocraft.modules.SEANetEncoder(**encoder_kwargs)
-        decoder = audiocraft.modules.SEANetDecoder(**decoder_kwargs)
+        if is_complex:
+            encoder_klass = audiocraft.modules.SEANetEncoder2d
+            decoder_klass = audiocraft.modules.SEANetDecoder2d
+        else:
+            encoder_klass = audiocraft.modules.SEANetEncoder
+            decoder_klass = audiocraft.modules.SEANetDecoder
+        encoder = encoder_klass(**encoder_kwargs)
+        decoder = decoder_klass(**decoder_kwargs)
         return encoder, decoder
     else:
         raise KeyError(f"Unexpected compression model {cfg.compression_model}")
@@ -71,14 +79,23 @@ def get_compression_model(cfg: omegaconf.DictConfig) -> CompressionModel:
         kwargs = dict_from_config(getattr(cfg, 'encodec'))
         encoder_name = kwargs.pop('autoencoder')
         quantizer_name = kwargs.pop('quantizer')
-        encoder, decoder = get_encodec_autoencoder(encoder_name, cfg)
+        is_complex = kwargs.pop('is_complex', False)
+        encoder, decoder = get_encodec_autoencoder(encoder_name, cfg, is_complex=is_complex)
         quantizer = get_quantizer(quantizer_name, cfg, encoder.dimension)
         frame_rate = kwargs['sample_rate'] // encoder.hop_length
         renormalize = kwargs.pop('renormalize', False)
         # deprecated params
         kwargs.pop('renorm', None)
-        return EncodecModel(encoder, decoder, quantizer,
-                            frame_rate=frame_rate, renormalize=renormalize, **kwargs).to(cfg.device)
+        if is_complex:
+            encodec_klass = ComplexEncodecModel
+            kwargs['num_conditions'] = len(cfg.model_conditions)
+        elif not is_complex and len(cfg.model_conditions) > 0:
+            encodec_klass = DenoiseEncodecModel
+            kwargs['num_conditions'] = len(cfg.model_conditions)
+        else:
+            encodec_klass = EncodecModel
+        return encodec_klass(encoder, decoder, quantizer,
+                             frame_rate=frame_rate, renormalize=renormalize, **kwargs).to(cfg.device)
     else:
         raise KeyError(f"Unexpected compression model {cfg.compression_model}")
 

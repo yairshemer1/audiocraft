@@ -6,14 +6,18 @@
 
 import logging
 import multiprocessing
+import tempfile
 from pathlib import Path
 import typing as tp
 
 import flashy
+import julius
 import omegaconf
 import torch
+import torch.nn.functional as F
+import wandb
 from torch import nn
-
+import soundfile
 from . import base, builders
 from .. import models, quantization
 from ..utils import checkpoint
@@ -80,14 +84,19 @@ class CompressionSolver(base.StandardSolver):
         self.logger.info("Info losses:")
         self.logger.info(self.info_losses)
 
-    def run_step(self, idx: int, batch: torch.Tensor, metrics: dict):
-        """Perform one training or valid step on a given batch."""
-        x = batch.to(self.device)
+    def run_model(self, x, **kwargs):
         y = x.clone()
 
         qres = self.model(x)
         assert isinstance(qres, quantization.QuantizedResult)
         y_pred = qres.x
+        return y, y_pred, qres
+
+    def run_step(self, idx: int, batch: torch.Tensor, metrics: dict):
+        """Perform one training or valid step on a given batch."""
+        x = batch.to(self.device)
+
+        y, y_pred, qres = self.run_model(x)
         # Log bandwidth in kb/s
         metrics['bandwidth'] = qres.bandwidth.mean()
 
@@ -196,10 +205,10 @@ class CompressionSolver(base.StandardSolver):
             for idx, batch in enumerate(lp):
                 x = batch.to(self.device)
                 with torch.no_grad():
-                    qres = self.model(x)
+                    y, y_pred, _ = self.run_model(x)
 
-                y_pred = qres.x.cpu()
-                y = batch.cpu()  # should already be on CPU but just in case
+                y_pred = y_pred.cpu()
+                y = y.cpu()  # should already be on CPU but just in case
                 pendings.append(pool.submit(evaluate_audio_reconstruction, y_pred, y, self.cfg))
 
             metrics_lp = self.log_progress(f'{evaluate_stage_name} metrics', pendings, updates=self.log_updates)
@@ -212,6 +221,9 @@ class CompressionSolver(base.StandardSolver):
 
     def generate(self):
         """Generate stage."""
+        if not self.cfg.logging.log_wandb:
+            logger.info("No generate without wandb.")
+            return
         self.model.eval()
         sample_manager = SampleManager(self.xp, map_reference_to_sample_id=True)
         generate_stage_name = str(self.current_stage)
@@ -220,18 +232,40 @@ class CompressionSolver(base.StandardSolver):
         updates = len(loader)
         lp = self.log_progress(generate_stage_name, loader, total=updates, updates=self.log_updates)
 
-        for batch in lp:
-            reference, _ = batch
-            reference = reference.to(self.device)
-            with torch.no_grad():
-                qres = self.model(reference)
-            assert isinstance(qres, quantization.QuantizedResult)
+        wandb_logger = self.get_wandb_logger()
+        rows = []
+        columns = ["sample_name", "ref[16kHz]", "pred[8kHz]"]
 
-            reference = reference.cpu()
-            estimate = qres.x.cpu()
-            sample_manager.add_samples(estimate, self.epoch, ground_truth_wavs=reference)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for batch in lp:
+                reference, _ = batch
+                reference = reference.to(self.device)
+                with torch.no_grad():
+                    _, _, qres = self.run_model(reference)
+                assert isinstance(qres, quantization.QuantizedResult)
 
+                reference = reference.cpu()
+                pred = qres.x.cpu()
+                for sample_idx in range(len(reference)):
+                    sample_id = sample_manager._get_sample_id(sample_idx, None, None)
+                    row = [sample_id]
+
+                    soundfile.write(file=f"{temp_dir}/{sample_id}_ref.wav",
+                                    data=reference[sample_idx].squeeze(),
+                                    samplerate=self.cfg.sample_rate)
+                    soundfile.write(file=f"{temp_dir}/{sample_id}_pred.wav",
+                                    data=pred[sample_idx].squeeze(),
+                                    samplerate=self.cfg.sample_rate)
+
+                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_ref.wav", self.cfg.sample_rate))
+                    row.append(wandb.Audio(f"{temp_dir}/{sample_id}_pred.wav", self.cfg.sample_rate))
+
+                    rows.append(row)
+            wandb_logger.writer.log({f"generate_epoch={self.epoch}": wandb.Table(columns=columns, data=rows)}, step=self.epoch)
         flashy.distrib.barrier()
+
+    def get_wandb_logger(self):
+        return self.result_logger._experiment_loggers['wandb']
 
     def load_from_pretrained(self, name: str) -> dict:
         model = models.CompressionModel.get_pretrained(name)
@@ -320,9 +354,21 @@ class CompressionSolver(base.StandardSolver):
 def evaluate_audio_reconstruction(y_pred: torch.Tensor, y: torch.Tensor, cfg: omegaconf.DictConfig) -> dict:
     """Audio reconstruction evaluation method that can be conveniently pickled."""
     metrics = {}
+
+    # fix sample rate if no SR is done
+    model_conds = cfg.get('model_conditions', None)
+    if model_conds is not None and "super_res" in model_conds and model_conds["super_res"]["prob"] == 0:
+        cfg.sample_rate = model_conds["super_res"]["target_sr"]
+
     if cfg.evaluate.metrics.visqol:
         visqol = builders.get_visqol(cfg.metrics.visqol)
         metrics['visqol'] = visqol(y_pred, y, cfg.sample_rate)
+    if cfg.evaluate.metrics.pesq:
+        metrics['pesq'] = builders.pesq(y_pred=y_pred, y=y, cfg=cfg)
+    if cfg.evaluate.metrics.lsd:
+        metrics['lsd'] = builders.get_lsd(y=y.squeeze(), y_pred=y_pred.squeeze())
+    metrics['stoi'] = builders.stoi(y_pred, y, cfg)
     sisnr = builders.get_loss('sisnr', cfg)
+    metrics['mse'] = torch.nn.functional.mse_loss(y_pred, y)
     metrics['sisnr'] = sisnr(y_pred, y)
     return metrics

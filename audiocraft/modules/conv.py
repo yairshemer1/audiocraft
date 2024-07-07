@@ -81,7 +81,10 @@ def pad1d(x: torch.Tensor, paddings: tp.Tuple[int, int], mode: str = 'constant',
         if length <= max_pad:
             extra_pad = max_pad - length + 1
             x = F.pad(x, (0, extra_pad))
-        padded = F.pad(x, paddings, mode, value)
+        if len(x.shape) == 4:
+            padded = F.pad(x, paddings, "constant", value)
+        else:
+            padded = F.pad(x, paddings, mode, value)
         end = padded.shape[-1] - extra_pad
         return padded[..., :end]
     else:
@@ -201,6 +204,60 @@ class StreamableConv1d(nn.Module):
         return self.conv(x)
 
 
+class StreamableConv2d(nn.Module):
+    """Conv2d with some builtin handling of asymmetric or causal padding
+    and normalization.
+    """
+    def __init__(self, in_channels: int, out_channels: int,
+                 kernel_size: int, stride: int = 1, dilation: int = 1,
+                 groups: int = 1, bias: bool = True, causal: bool = False,
+                 norm: str = 'none', norm_kwargs: tp.Dict[str, tp.Any] = {},
+                 pad_mode: str = 'reflect'):
+        super().__init__()
+        # warn user on unusual setup between dilation and stride
+        if stride > 1 and dilation > 1:
+            warnings.warn("StreamableConv1d has been initialized with stride > 1 and dilation > 1"
+                          f" (kernel_size={kernel_size} stride={stride}, dilation={dilation}).")
+        self.conv = NormConv2d(in_channels, out_channels, kernel_size, stride=(stride, 1),
+                               dilation=dilation, groups=groups, bias=bias,
+                               norm=norm, norm_kwargs=norm_kwargs)
+        self.causal = causal
+        self.pad_mode = pad_mode
+
+    def forward(self, x):
+        B, C, F, T = x.shape
+        kernel_size_h, kernel_size_w = self.conv.conv.kernel_size
+        stride_h, stride_w = self.conv.conv.stride
+        dilation_h, dilation_w = self.conv.conv.dilation
+        kernel_size_h = (kernel_size_h - 1) * dilation_h + 1  # effective kernel size with dilations
+        kernel_size_w = (kernel_size_w - 1) * dilation_w + 1  # effective kernel size with dilations
+        padding_total_h = kernel_size_h - stride_h
+        padding_total_w = kernel_size_w - stride_w
+        extra_padding_w = get_extra_padding_for_conv1d(x, kernel_size_w, stride_w, padding_total_w)
+        extra_padding_h = get_extra_padding_for_conv1d(x.permute(0, 1, 3, 2), kernel_size_h, stride_h, padding_total_h)
+
+        if self.causal:
+            # Left padding for causal
+            paddings = (padding_total_w, extra_padding_w, padding_total_h, extra_padding_h)
+            if self.pad_mode == "reflect":
+                x = nn.ReflectionPad2d(paddings)(x)
+            else:
+                x = nn.ConstantPad2d(paddings, value=0.)(x)
+        else:
+            # Asymmetric padding required for odd strides
+            padding_right_w = padding_total_w // 2
+            padding_left_w = padding_total_w - padding_right_w
+
+            padding_right_h = padding_total_h // 2
+            padding_left_h = padding_total_h - padding_right_h
+            paddings = (padding_left_w, padding_right_w + extra_padding_w, padding_left_h, padding_right_h + extra_padding_h)
+            if self.pad_mode == "reflect":
+                x = nn.ReflectionPad2d(paddings)(x)
+            else:
+                x = nn.ConstantPad2d(paddings, value=0.)(x)
+        return self.conv(x)
+
+
 class StreamableConvTranspose1d(nn.Module):
     """ConvTranspose1d with some builtin handling of asymmetric or causal padding
     and normalization.
@@ -240,4 +297,57 @@ class StreamableConvTranspose1d(nn.Module):
             padding_right = padding_total // 2
             padding_left = padding_total - padding_right
             y = unpad1d(y, (padding_left, padding_right))
+        return y
+
+
+class StreamableConvTranspose2d(nn.Module):
+    """ConvTranspose2d with some builtin handling of asymmetric or causal padding
+    and normalization.
+    """
+    def __init__(self, in_channels: int, out_channels: int,
+                 kernel_size: int, stride: int = 1, causal: bool = False,
+                 norm: str = 'none', trim_right_ratio: float = 1.,
+                 norm_kwargs: tp.Dict[str, tp.Any] = {}):
+        super().__init__()
+        self.convtr = NormConvTranspose2d(in_channels, out_channels, kernel_size, stride=(stride, 1),
+                                          norm=norm, norm_kwargs=norm_kwargs)
+        self.causal = causal
+        self.trim_right_ratio = trim_right_ratio
+        assert self.causal or self.trim_right_ratio == 1., \
+            "`trim_right_ratio` != 1.0 only makes sense for causal convolutions"
+        assert self.trim_right_ratio >= 0. and self.trim_right_ratio <= 1.
+
+    def forward(self, x):
+        kernel_size_h, kernel_size_w = self.convtr.convtr.kernel_size
+        stride_h, stride_w = self.convtr.convtr.stride
+        padding_total_h = kernel_size_h - stride_h
+        padding_total_w = kernel_size_w - stride_w
+
+        y = self.convtr(x)
+
+        # We will only trim fixed padding. Extra padding from `pad_for_conv1d` would be
+        # removed at the very end, when keeping only the right length for the output,
+        # as removing it here would require also passing the length at the matching layer
+        # in the encoder.
+        if self.causal:
+            # Trim the padding on the right according to the specified ratio
+            # if trim_right_ratio = 1.0, trim everything from right
+            padding_right = math.ceil(padding_total_w * self.trim_right_ratio)
+            padding_left = padding_total_w - padding_right
+            y = unpad1d(y, (padding_left, padding_right))
+            y = y.permute(0, 1, 3, 2)
+            padding_right = math.ceil(padding_total_h * self.trim_right_ratio)
+            padding_left = padding_total_h - padding_right
+            y = unpad1d(y, (padding_left, padding_right))
+            y = y.permute(0, 1, 3, 2)
+        else:
+            # Asymmetric padding required for odd strides
+            padding_right = padding_total_w // 2
+            padding_left = padding_total_w - padding_right
+            y = unpad1d(y, (padding_left, padding_right))
+            y = y.permute(0, 1, 3, 2)
+            padding_right = padding_total_h // 2
+            padding_left = padding_total_h - padding_right
+            y = unpad1d(y, (padding_left, padding_right))
+            y = y.permute(0, 1, 3, 2)
         return y

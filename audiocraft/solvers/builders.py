@@ -12,6 +12,8 @@ from the Hydra config.
 from enum import Enum
 import logging
 import typing as tp
+from pesq import pesq as pesq_func
+from pystoi import stoi as stoi_func
 
 import dora
 import flashy
@@ -37,16 +39,21 @@ class DatasetType(Enum):
     AUDIO = "audio"
     MUSIC = "music"
     SOUND = "sound"
+    NOISY_CLEAN = "noisy_clean"
 
 
 def get_solver(cfg: omegaconf.DictConfig) -> StandardSolver:
     """Instantiate solver from config."""
     from .audiogen import AudioGenSolver
     from .compression import CompressionSolver
+    from .complex_compression import ComplexCompressionSolver
+    from .denoise_compression import DenoiseCompressionSolver
     from .musicgen import MusicGenSolver
     from .diffusion import DiffusionSolver
     klass = {
         'compression': CompressionSolver,
+        'complex_compression': ComplexCompressionSolver,
+        'denoise_compression': DenoiseCompressionSolver,
         'musicgen': MusicGenSolver,
         'audiogen': AudioGenSolver,
         'lm': MusicGenSolver,  # backward compatibility
@@ -282,6 +289,65 @@ def get_chroma_cosine_similarity(cfg: omegaconf.DictConfig) -> metrics.ChromaCos
     return metrics.ChromaCosineSimilarityMetric(**kwargs)
 
 
+class STFTMag(nn.Module):
+    def __init__(self,
+                 nfft=1024,
+                 hop=256):
+        super().__init__()
+        self.nfft = nfft
+        self.hop = hop
+        self.register_buffer('window', torch.hann_window(nfft), False)
+
+    # x: [B,T] or [T]
+    @torch.no_grad()
+    def forward(self, x):
+        T = x.shape[-1]
+        stft = torch.stft(x,
+                          self.nfft,
+                          self.hop,
+                          window=self.window,
+                          return_complex=False,
+                          )
+        mag = torch.norm(stft, p=2, dim=-1)
+        return mag
+
+
+# taken from: https://github.com/nanahou/metric/blob/master/measure_SNR_LSD.py
+def get_lsd(y, y_pred):
+    """
+       Compute LSD (log spectral distance)
+       Arguments:
+           y_pred: vector (torch.Tensor), enhanced signal [B,T]
+           y: vector (torch.Tensor), reference signal(ground truth) [B,T]
+    """
+
+    stft = STFTMag(2048, 512)
+    sp = torch.log10(stft(y).square().clamp(1e-8))
+    st = torch.log10(stft(y_pred).square().clamp(1e-8))
+    return (sp - st).square().mean(dim=1).sqrt().mean()
+
+
+def pesq(y_pred: torch.Tensor, y: torch.Tensor, cfg: omegaconf.DictConfig):
+    scores = []
+    for ind in range(len(y)):
+        try:
+            sample_score = pesq_func(fs=cfg.sample_rate, deg=y.squeeze().numpy()[ind], ref=y_pred.squeeze().numpy()[ind], mode="nb")
+            scores.append(sample_score)
+        except:
+            continue
+    pesq_score = torch.Tensor(scores)
+    return torch.mean(pesq_score)
+
+
+def stoi(y_pred: torch.Tensor, y: torch.Tensor, cfg: omegaconf.DictConfig):
+    scores = []
+    for ind in range(len(y)):
+        sample_score = stoi_func(x=y.squeeze().numpy()[ind], y=y_pred.squeeze().numpy()[ind], fs_sig=cfg.sample_rate, extended=True)
+        scores.append(sample_score)
+    stoi_score = torch.Tensor(scores)
+    return torch.mean(stoi_score)
+
+
 def get_audio_datasets(cfg: omegaconf.DictConfig,
                        dataset_type: DatasetType = DatasetType.AUDIO) -> tp.Dict[str, torch.utils.data.DataLoader]:
     """Build AudioDataset from configuration.
@@ -346,6 +412,8 @@ def get_audio_datasets(cfg: omegaconf.DictConfig,
             dataset = data.sound_dataset.SoundDataset.from_meta(path, **kwargs)
         elif dataset_type == DatasetType.AUDIO:
             dataset = data.info_audio_dataset.InfoAudioDataset.from_meta(path, return_info=return_info, **kwargs)
+        elif dataset_type == DatasetType.NOISY_CLEAN:
+            dataset = data.audio_dataset.NoisyCleanDataset.from_meta(path, return_info=return_info, **kwargs)
         else:
             raise ValueError(f"Dataset type is unsupported: {dataset_type}")
 
