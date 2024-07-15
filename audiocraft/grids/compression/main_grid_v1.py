@@ -86,6 +86,6 @@ def explorer(launcher):
                 "data_preprocess.nfft": nfft,
                 "data_preprocess.win_length": nfft,
                 "data_preprocess.hop_length": hop,
-                "seanet.frequency_bins": int(np.celi(nfft/2)),
+                "seanet.frequency_bins": int(np.ceil(nfft/2)),
             }
             launcher(attrs)
