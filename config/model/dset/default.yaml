@@ -4,10 +4,7 @@
 # Please don't update this file directly. Instead use distinct configuration files
 # to override the below configuration.
 datasource:
-  max_sample_rate: 44100
-  max_channels: 2
-
-  train: egs/debug_noisy/tr/data.jsonl
-  valid: egs/debug_noisy/cv/data.jsonl
-  evaluate: egs/debug_noisy/tt/data.jsonl
-  generate: egs/debug_noisy/cv/data.jsonl
+  train: ???
+  valid: ???
+  evaluate: ???
+  generate: ???

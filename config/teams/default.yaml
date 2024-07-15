@@ -1,12 +1,20 @@
 default:
-  dora_dir: /cs/labs/adiyoss/yair.shemer/encodec-experiments
+  dora_dir: /cs/labs/adiyoss/dort/audiocraft/experiment_outputs
   partitions:
     global: debug
     team: debug
-  reference_dir: /cs/labs/adiyoss/yair.shemer/encodec-experiments/ref
+  reference_dir: /tmp
 darwin:  # if we detect we are on a Mac, then most likely we are doing unit testing etc.
-  dora_dir: /cs/labs/adiyoss/yair.shemer/encodec-experiments
+  dora_dir: /cs/labs/adiyoss/dort/audiocraft/experiment_outputs
   partitions:
     global: debug
     team: debug
-  reference_dir: /cs/labs/adiyoss/yair.shemer/encodec-experiments/ref
+  reference_dir: /tmp
+fair:
+  dora_dir: /checkpoint/${oc.env:USER}/xp_files_yair
+  partitions:
+    global: devlab,learnlab,scavenge,learnfair
+    team: devlab,learnlab,scavenge,learnfair
+  reference_dir: /large_experiments/audiocraft/reference
+  dataset_mappers:
+    "^/datasets01/datasets01": "/datasets01"
