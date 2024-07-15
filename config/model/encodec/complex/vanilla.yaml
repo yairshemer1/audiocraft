@@ -1,0 +1,8 @@
+# @package __global__
+
+defaults:
+  - encodec/complex/default
+
+solver: complex_compression
+
+

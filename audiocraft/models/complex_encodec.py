@@ -39,18 +39,22 @@ class ComplexEncodecModel(EncodecModel):
 
     def forward(self, x: torch.Tensor, **kwargs) -> qt.QuantizedResult:
         cond = kwargs.get('condition', None)
-        assert cond is not None, 'condition is required for complex encodec'
+
         x, scale = self.preprocess(x)
 
         assert x.dim() == 4
         assert x.shape[1] == 2
 
         emb = self.encoder(x)
-        emb = self.encoder_film(emb, cond)
+
+        if cond is not None:
+            emb = self.encoder_film(emb, cond)
 
         q_res = self.quantizer(emb, self.frame_rate)
 
-        q_res.x = self.decoder_film(q_res.x, cond)
+        if cond is not None:
+            q_res.x = self.decoder_film(q_res.x, cond)
+
         out = self.decoder(q_res.x)
         q_res.x = self.postprocess(out, scale)
         return q_res

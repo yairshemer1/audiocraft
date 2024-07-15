@@ -1,0 +1,14 @@
+# @package __global__
+
+defaults:
+  - encodec/complex/default
+
+solver: complex_super_res_denoise_compression
+
+model_conditions:
+  super_res:
+    prob: 0.5
+    origin_sr: ${sample_rate}
+    target_sr: 8000
+  denoise:
+    prob: 0.5

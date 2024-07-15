@@ -1,0 +1,11 @@
+# @package __global__
+
+defaults:
+  - encodec/complex/default
+
+solver: complex_denoise_compression
+
+model_conditions:
+  denoise:
+    prob: 0.5
+

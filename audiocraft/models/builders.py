@@ -86,14 +86,16 @@ def get_compression_model(cfg: omegaconf.DictConfig) -> CompressionModel:
         renormalize = kwargs.pop('renormalize', False)
         # deprecated params
         kwargs.pop('renorm', None)
+        num_conditions = len(cfg.model_conditions) if hasattr(cfg, "model_conditions") else 0
         if is_complex:
             encodec_klass = ComplexEncodecModel
-            kwargs['num_conditions'] = len(cfg.model_conditions)
-        elif not is_complex and len(cfg.model_conditions) > 0:
-            encodec_klass = DenoiseEncodecModel
-            kwargs['num_conditions'] = len(cfg.model_conditions)
+            kwargs['num_conditions'] = num_conditions
         else:
             encodec_klass = EncodecModel
+            if num_conditions > 0:
+                encodec_klass = DenoiseEncodecModel
+                kwargs['num_conditions'] = num_conditions
+
         return encodec_klass(encoder, decoder, quantizer,
                              frame_rate=frame_rate, renormalize=renormalize, **kwargs).to(cfg.device)
     else:

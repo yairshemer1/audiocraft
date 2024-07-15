@@ -233,14 +233,14 @@ class SEANetEncoder2d(nn.Module):
                  norm: str = 'none', norm_params: tp.Dict[str, tp.Any] = {}, kernel_size: int = 7,
                  last_kernel_size: int = 7, residual_kernel_size: int = 3, dilation_base: int = 2, causal: bool = False,
                  pad_mode: str = 'reflect', true_skip: bool = True, compress: int = 2, lstm: int = 0,
-                 disable_norm_outer_blocks: int = 0, frequency_bins: int = 512, temporal_ratio: tp.List[int] = []):
+                 disable_norm_outer_blocks: int = 0, frequency_bins: int = 512, temporal_ratios: tp.List[int] = []):
         super().__init__()
         self.channels = channels
         self.dimension = dimension
         self.n_filters = n_filters
         self.frequency_bins = frequency_bins
         assert self.frequency_bins == 512, "model handles 512 frequency channels, change manually and in config file"
-        self.temporal_ratios = temporal_ratio
+        self.temporal_ratios = temporal_ratios
         self.ratios = list(reversed(ratios))
         del ratios
         self.n_residual_layers = n_residual_layers
@@ -463,14 +463,14 @@ class SEANetDecoder2d(nn.Module):
                  norm: str = 'none', norm_params: tp.Dict[str, tp.Any] = {}, kernel_size: int = 7,
                  last_kernel_size: int = 7, residual_kernel_size: int = 3, dilation_base: int = 2, causal: bool = False,
                  pad_mode: str = 'reflect', true_skip: bool = True, compress: int = 2, lstm: int = 0,
-                 disable_norm_outer_blocks: int = 0, trim_right_ratio: float = 1.0, frequency_bins: int = 512, temporal_ratio: tp.List[int] = []):
+                 disable_norm_outer_blocks: int = 0, trim_right_ratio: float = 1.0, frequency_bins: int = 512, temporal_ratios: tp.List[int] = []):
         super().__init__()
         self.dimension = dimension
         self.channels = channels
         self.n_filters = n_filters
         self.frequency_bins = frequency_bins
         assert self.frequency_bins == 512, "model handles 512 frequency channels, change manually and in config file"
-        self.temporal_ratio = temporal_ratio
+        self.temporal_ratios = temporal_ratios
         self.ratios = ratios
         del ratios
         self.n_residual_layers = n_residual_layers
@@ -484,7 +484,7 @@ class SEANetDecoder2d(nn.Module):
         act = getattr(nn, activation)
         mult = int(2 ** len(self.ratios))
         model: tp.List[nn.Module] = []
-        for i, ratio in enumerate(self.temporal_ratio):
+        for i, ratio in enumerate(self.temporal_ratios):
             block_norm = 'none' if self.disable_norm_outer_blocks >= self.n_blocks - (i + 1) else norm
             # Add upsampling layers
             model += [

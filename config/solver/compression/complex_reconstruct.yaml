@@ -2,7 +2,7 @@
 
 defaults:
   - compression/default
-  - /model: encodec/complex_encodec
+  - /model: encodec/complex/default
   - override /dset: audio/valentini_noisy_56spk
   - _self_
 
@@ -39,9 +39,9 @@ dataset:
     segment_duration: 4
 
 evaluate:
-  every: 10
+  every: 1000000
 generate:
-  every: 10
+  every: 1000000
 optim:
   epochs: 500
   updates_per_epoch: 1000
