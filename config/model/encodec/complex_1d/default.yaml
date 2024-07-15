@@ -4,21 +4,22 @@ defaults:
   - ../default
   - _self_
 
+
 encodec:
   is_complex: true
-  use_1d: false
+  use_1d: true
+
+seanet:
+  n_freqs: 512
+  ratios: [1,1,1,1,1]
+  n_filters: 2048
+  channels: 1024
 
 data_preprocess:
   n_fft: 1023
   hop_length: 250 # n_fft // 4
   win_length: 1023 # n_fft
   normalized: false
-
-seanet:
-  frequency_bins: 512
-  n_filters: 48
-  ratios: [4, 2, 2]
-  temporal_ratios: []
 
 rvq:
   bins: 2048
