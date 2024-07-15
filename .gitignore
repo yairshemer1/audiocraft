@@ -47,9 +47,6 @@ wheels/
 venv/
 ENV/
 
-# egs with manifest files
-egs/
-
 # personal notebooks & scripts
 */local_scripts
 */notes
