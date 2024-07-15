@@ -19,7 +19,7 @@ from ..compression._explorers import CompressionExplorer
 def explorer(launcher):
 
     # n_gpus = 16
-    n_gpus = 64
+    n_gpus = 8
 
     launcher.slurm_(gpus=n_gpus, time=4320,
                     partition='devlab,learnlab,learnfair',
@@ -30,31 +30,44 @@ def explorer(launcher):
     # base causal EnCodec trained on monophonic audio sampled at 32 kHz
     launcher.bind_({
         'solver': 'compression/complex_reconstruct',
-        'model': 'h_encodec/acoustic_semantic_mfcc',
-        'logging.log_wandb': True,
-        'dataset.generate.num_samples': 10,
-        'dataset.segment_duration': 5.0,
-        'dataset.generate.segment_duration': 5.0,
-        'optim.updates_per_epoch': 2500,
-        'dataset.batch_size': 128,
-        'dataset.generate.batch_size': 128,
-        'dataset.evaluate.batch_size': 128,
-        'optim.lr': 5e-5,
-        'optim.optimizer': 'adamw',
+        'logging.log_wandb': False,
+        'dataset.batch_size': 32,
     })
+
+    # dsets = ["audio/valentini_56spk", "audio/valentini_noisy_56spk"]
+    model_dset_sr_name = [
+        ("encodec/complex/denoise", "audio/valentini_noisy_56spk", 8000, 'denoise-ours,single task 8-8'),
+        ("encodec/complex/super_res", "audio/valentini_56spk", 16000, 'sr-ours,single task 8-16'),
+        ("encodec/encodec_large_nq4_s320", "audio/valentini_56spk", 16000, 'compress-encodec 16-16'),
+        ("encodec/complex/vanilla", "audio/valentini_56spk", 16000, 'compress-ours vanilla 16-16'),
+        ("encodec/complex/vanilla", "audio/valentini_56spk", 8000, 'compress-ours vanilla 8-8'),
+        ("encodec/encodec_large_nq4_s320", "audio/valentini_56spk", 8000, 'compress-encodec 8-8'),
+
+        # ("encodec/complex/super_res_denoise", "audio/valentini_noisy_56spk"),
+    ]
+
+    model_dset_sr_name_temp = [
+        ("encodec/complex/vanilla", "audio/valentini_56spk", 16000, 'compress-ours vanilla, temporal x2 16-16', [2]),
+        ("encodec/complex/vanilla", "audio/valentini_56spk", 16000, 'compress-ours vanilla, temporal x4 16-16', [2,2])
+    ]
 
     # launch xp
     with launcher.job_array():
-
-        # for cpc_sem_sem, detach_cond in [(True, True), (True, False)]:
-        for detach_cpc_targets, detach_cond in [(False, True), (False, False), (True, True), (True, False)]:
-
-            name = f"semantic hencodec; cpc detach_cpc_targets: {detach_cpc_targets}, detach cond: {detach_cond}"
+        for model, dset, sr, label in model_dset_sr_name:
             attrs = {
-                "detach_cpc_targets": detach_cpc_targets,
-                "additional_kwargs.detach_semantic_branch": detach_cond,
-                'label': name,
-                'wandb.name': name,
+                "model": model,
+                "dset": dset,
+                "sample_rate": sr,
+                "label": label,
             }
             launcher(attrs)
 
+        for model, dset, sr, label, temporal_ratios in model_dset_sr_name_temp:
+            attrs = {
+                "model": model,
+                "dset": dset,
+                "sample_rate": sr,
+                "label": label,
+                "seanet.temporal_ratios": temporal_ratios,
+            }
+            launcher(attrs)

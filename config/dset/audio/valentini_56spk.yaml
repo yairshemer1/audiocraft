@@ -1,0 +1,13 @@
+# @package __global__
+
+# WARNING: This is a base configuration file shared across ALL solvers in AudioCraft
+# Please don't update this file directly. Instead use distinct configuration files
+# to override the below configuration.
+datasource:
+  max_sample_rate: 44100
+  max_channels: 2
+
+  train: egs/valentini_58spk/tr/data.jsonl
+  valid: egs/valentini_58spk/cv/data.jsonl
+  evaluate: egs/valentini_58spk/tt/data.jsonl
+  generate: egs/valentini_58spk/tt/data.jsonl
