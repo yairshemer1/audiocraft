@@ -11,7 +11,7 @@ You can cancel and experiment by commenting its line.
 
 This grid shows how to train a base causal EnCodec model at 24 kHz.
 """
-
+import numpy as np
 from ..compression._explorers import CompressionExplorer
 
 
@@ -50,6 +50,11 @@ def explorer(launcher):
         ("encodec/complex/vanilla", "audio/valentini_56spk", 16000, 'compress-ours vanilla, temporal x2 16-16', [2]),
         ("encodec/complex/vanilla", "audio/valentini_56spk", 16000, 'compress-ours vanilla, temporal x4 16-16', [2,2])
     ]
+    
+    model_dset_sr_name_freq_hparams = [
+        ("encodec/complex/vanilla", "audio/valentini_56spk", 16000, 'compress-ours vanilla, temporal x2 16-16', 2047, 500),
+        ("encodec/complex/vanilla", "audio/valentini_56spk", 16000, 'compress-ours vanilla, temporal x4 16-16', 4095, 1000)
+    ]
 
     # launch xp
     with launcher.job_array():
@@ -69,5 +74,18 @@ def explorer(launcher):
                 "sample_rate": sr,
                 "label": label,
                 "seanet.temporal_ratios": temporal_ratios,
+            }
+            launcher(attrs)
+
+        for model, dset, sr, label, nfft, hop in model_dset_sr_name_freq_hparams:
+            attrs = {
+                "model": model,
+                "dset": dset,
+                "sample_rate": sr,
+                "label": label,
+                "data_preprocess.nfft": nfft,
+                "data_preprocess.win_length": nfft,
+                "data_preprocess.hop_length": hop,
+                "seanet.frequency_bins": int(np.celi(nfft/2)),
             }
             launcher(attrs)

@@ -14,6 +14,7 @@ data_preprocess:
   normalized: false
 
 seanet:
+  frequency_bins: 512
   n_filters: 48
   ratios: [4, 2, 2]
   temporal_ratios: []
