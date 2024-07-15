@@ -38,9 +38,13 @@ def explorer(launcher):
     model_dset_sr_name = [
         ("encodec/complex/denoise", "audio/valentini_noisy_56spk", 8000, 'denoise-ours,single task 8-8'),
         ("encodec/complex/super_res", "audio/valentini_56spk", 16000, 'sr-ours,single task 8-16'),
-        ("encodec/encodec_large_nq4_s320", "audio/valentini_56spk", 16000, 'compress-encodec 16-16'),
         ("encodec/complex/vanilla", "audio/valentini_56spk", 16000, 'compress-ours vanilla 16-16'),
         ("encodec/complex/vanilla", "audio/valentini_56spk", 8000, 'compress-ours vanilla 8-8'),
+
+        # ("encodec/complex/super_res_denoise", "audio/valentini_noisy_56spk"),
+    ]
+    model_dset_sr_name_encodec = [
+        ("encodec/encodec_large_nq4_s320", "audio/valentini_56spk", 16000, 'compress-encodec 16-16'),
         ("encodec/encodec_large_nq4_s320", "audio/valentini_56spk", 8000, 'compress-encodec 8-8'),
 
         # ("encodec/complex/super_res_denoise", "audio/valentini_noisy_56spk"),
@@ -83,9 +87,19 @@ def explorer(launcher):
                 "dset": dset,
                 "sample_rate": sr,
                 "label": label,
-                "data_preprocess.nfft": nfft,
+                "data_preprocess.n_fft": nfft,
                 "data_preprocess.win_length": nfft,
                 "data_preprocess.hop_length": hop,
                 "seanet.frequency_bins": int(np.ceil(nfft/2)),
+            }
+            launcher(attrs)
+
+        for model, dset, sr, label in model_dset_sr_name_encodec:
+            attrs = {
+                "solver": "compression/reconstruct_encodec",
+                "model": model,
+                "dset": dset,
+                "sample_rate": sr,
+                "label": label,
             }
             launcher(attrs)

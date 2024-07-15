@@ -1,0 +1,47 @@
+# @package __global__
+
+defaults:
+  - compression/default
+  - /model: encodec/encodec_large_nq4_s320
+  - override /dset: audio/valentini_56spk
+  - _self_
+
+solver: compression
+
+channels: 1
+sample_rate: 16000
+
+
+logging:
+  level: INFO
+  log_updates: 10
+  log_wandb: true
+
+wandb:
+  with_media_logging: true
+  project:  audiocraft-encodec
+  name:  # optional name for the experiment
+  group:  # optional group
+
+dataset:
+  batch_size: 32
+  num_workers: 10
+  segment_duration: 1
+  valid:
+    batch_size: 32
+    num_samples: 768
+  evaluate:
+    batch_size: 32
+    num_samples: 824
+  generate:
+    batch_size: 32
+    num_samples: 10
+    segment_duration: 2
+
+evaluate:
+  every: 10
+generate:
+  every: 10
+optim:
+  epochs: 500
+  updates_per_epoch: 400
