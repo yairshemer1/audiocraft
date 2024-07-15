@@ -18,5 +18,5 @@ from .conv import (
     unpad1d,
 )
 from .lstm import StreamableLSTM
-from .seanet import SEANetEncoder, SEANetDecoder, SEANetEncoder2d, SEANetDecoder2d
+from .seanet import SEANetEncoder, SEANetDecoder, SEANetEncoder2d, SEANetDecoder2d, SEANetEncoderComplex, SEANetDecoderComplex
 from .transformer import StreamingTransformer
