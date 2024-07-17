@@ -68,7 +68,7 @@ def explorer(launcher):
         ("encodec/complex_1d/1d_vanilla", "audio/valentini_56spk", 16000, 'compress-1D-ours vanilla 16-16'),
         ("encodec/complex_1d/1d_sr_denoise", "audio/valentini_noisy_56spk", 16000, 'compress-1D-ours sr + denoise 8-16'),
     ]
-    
+
     model_dset_sr_name_encodec1d_ratios = [
         ("encodec/complex_1d/1d_vanilla", "audio/valentini_56spk", 16000, 'compress-x2-1D-ours vanilla 16-16', [2,1,1,1,1]),
         ("encodec/complex_1d/1d_vanilla", "audio/valentini_56spk", 16000, 'compress-x4-1D-ours vanilla 16-16', [2,2,1,1,1]),
