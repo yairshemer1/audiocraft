@@ -7,7 +7,7 @@ datasource:
   max_sample_rate: 44100
   max_channels: 2
 
-  train: egs/debug_noisy/tr/data.jsonl
-  valid: egs/debug_noisy/cv/data.jsonl
-  evaluate: egs/debug_noisy/tt/data.jsonl
-  generate: egs/debug_noisy/cv/data.jsonl
+  train: egs/valentini_noisy_58spk/tt/data.jsonl
+  valid: egs/valentini_noisy_58spk/tt/data.jsonl
+  evaluate: egs/valentini_noisy_58spk/tt/data.jsonl
+  generate: egs/valentini_noisy_58spk/tt/data.jsonl

@@ -53,7 +53,8 @@ def get_quantizer(quantizer: str, cfg: omegaconf.DictConfig, dimension: int) -> 
     return klass(**kwargs)
 
 
-def get_encodec_autoencoder(encoder_name: str, cfg: omegaconf.DictConfig, is_complex: bool = False):
+def get_encodec_autoencoder(encoder_name: str, cfg: omegaconf.DictConfig, is_complex: bool = False,
+                            use_1d: bool=False):
     if encoder_name == 'seanet':
         kwargs = dict_from_config(getattr(cfg, 'seanet'))
         encoder_override_kwargs = kwargs.pop('encoder')
@@ -61,8 +62,15 @@ def get_encodec_autoencoder(encoder_name: str, cfg: omegaconf.DictConfig, is_com
         encoder_kwargs = {**kwargs, **encoder_override_kwargs}
         decoder_kwargs = {**kwargs, **decoder_override_kwargs}
         if is_complex:
-            encoder_klass = audiocraft.modules.SEANetEncoder2d
-            decoder_klass = audiocraft.modules.SEANetDecoder2d
+            if use_1d:
+                encoder_klass = audiocraft.modules.SEANetEncoderComplex
+                decoder_klass = audiocraft.modules.SEANetDecoderComplex
+                for key in {'temporal_ratios', 'frequency_bins'}:
+                    encoder_kwargs.pop(key)
+                    decoder_kwargs.pop(key)
+            else:
+                encoder_klass = audiocraft.modules.SEANetEncoder2d
+                decoder_klass = audiocraft.modules.SEANetDecoder2d
         else:
             encoder_klass = audiocraft.modules.SEANetEncoder
             decoder_klass = audiocraft.modules.SEANetDecoder
@@ -80,7 +88,8 @@ def get_compression_model(cfg: omegaconf.DictConfig) -> CompressionModel:
         encoder_name = kwargs.pop('autoencoder')
         quantizer_name = kwargs.pop('quantizer')
         is_complex = kwargs.pop('is_complex', False)
-        encoder, decoder = get_encodec_autoencoder(encoder_name, cfg, is_complex=is_complex)
+        use_1d = kwargs.pop('use_1d', False)
+        encoder, decoder = get_encodec_autoencoder(encoder_name, cfg, is_complex=is_complex, use_1d=use_1d)
         quantizer = get_quantizer(quantizer_name, cfg, encoder.dimension)
         frame_rate = kwargs['sample_rate'] // encoder.hop_length
         renormalize = kwargs.pop('renormalize', False)

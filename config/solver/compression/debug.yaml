@@ -3,7 +3,7 @@
 defaults:
   - compression/default
   - /model: encodec/complex/denoise
-  - override /dset: audio/debug
+  - override /dset: audio/valentini_noisy_56spk
   - _self_
 
 channels: 1

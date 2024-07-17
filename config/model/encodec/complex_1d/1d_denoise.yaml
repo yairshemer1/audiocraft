@@ -1,0 +1,7 @@
+# @package __global__
+
+defaults:
+  - encodec/complex_1d/default
+
+solver: complex_denoise_compression
+

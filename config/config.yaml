@@ -72,4 +72,4 @@ dora:
   # for grids, always run from a clean repo, allowing reliable runs and storing
   # the exact commit. Your repo must be absolutely pristine clean.
   # Local `dora run` are not impacted for easier debugging.
-  git_save: true
+  git_save: false

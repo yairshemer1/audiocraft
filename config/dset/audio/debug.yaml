@@ -7,7 +7,7 @@ datasource:
   max_sample_rate: 44100
   max_channels: 2
 
-  train: /cs/usr/yair.shemer/AudioLab/audiocraft/egs/debug/tr/data.jsonl
-  valid: /cs/usr/yair.shemer/AudioLab/audiocraft/egs/debug/cv/data.jsonl
-  evaluate: /cs/usr/yair.shemer/AudioLab/audiocraft/egs/debug/tt/data.jsonl
-  generate: /cs/usr/yair.shemer/AudioLab/audiocraft/egs/debug/cv/data.jsonl
+  train: egs/debug/tr/data.jsonl
+  valid: egs/debug/cv/data.jsonl
+  evaluate: egs/debug/tt/data.jsonl
+  generate: egs/debug/cv/data.jsonl
