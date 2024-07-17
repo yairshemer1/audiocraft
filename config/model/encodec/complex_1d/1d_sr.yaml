@@ -4,3 +4,9 @@ defaults:
   - encodec/complex_1d/default
 
 solver: complex_super_res_compression
+
+model_conditions:
+  super_res:
+    prob: 0.5
+    origin_sr: ${sample_rate}
+    target_sr: 8000
