@@ -210,7 +210,10 @@ class SEANetEncoderComplex(SEANetEncoder):
     def forward(self, x):
         B, C, F, T = x.shape
         x = x.reshape(B, -1, T)
-
+        # print(x.shape)
+        # for layer in self.model:
+        #     x = layer(x)
+        #     print(x.shape)
         x = self.model(x)
         return x
 
