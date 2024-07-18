@@ -87,7 +87,7 @@ def explorer(launcher):
             }
             launcher(attrs)
 
-        for model, dset, sr, label,ratios in model_dset_sr_name_encodec1d_ratios:
+        for model, dset, sr, label, ratios in model_dset_sr_name_encodec1d_ratios:
             attrs = {
                 "model": model,
                 "dset": dset,

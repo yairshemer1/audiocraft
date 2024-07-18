@@ -65,9 +65,10 @@ def get_encodec_autoencoder(encoder_name: str, cfg: omegaconf.DictConfig, is_com
             if use_1d:
                 encoder_klass = audiocraft.modules.SEANetEncoderComplex
                 decoder_klass = audiocraft.modules.SEANetDecoderComplex
+                
                 for key in {'temporal_ratios', 'frequency_bins'}:
-                    encoder_kwargs.pop(key)
-                    decoder_kwargs.pop(key)
+                    encoder_kwargs.pop(key, None)
+                    decoder_kwargs.pop(key, None)
             else:
                 encoder_klass = audiocraft.modules.SEANetEncoder2d
                 decoder_klass = audiocraft.modules.SEANetDecoder2d
