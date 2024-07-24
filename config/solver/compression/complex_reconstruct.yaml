@@ -6,7 +6,7 @@ defaults:
   - override /dset: audio/valentini_noisy_56spk
   - _self_
 
-solver: complex_compression
+# solver: complex_compression
 
 channels: 1
 sample_rate: 16000
