@@ -242,6 +242,7 @@ class ComplexDenoiseCompressionSolver(CompressionSolver):
         pendings = []
         ctx = multiprocessing.get_context('spawn')
         with get_pool_executor(self.cfg.evaluate.num_workers, mp_context=ctx) as pool:
+            self.cfg.model_conditions.denoise.prob = self.denoise_params.prob = 1
             for _, batch in enumerate(lp):
                 noisy, clean = batch
                 noisy = noisy.to(self.device)
