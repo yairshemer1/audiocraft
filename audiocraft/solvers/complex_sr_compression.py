@@ -281,6 +281,7 @@ class ComplexSuperResCompressionSolver(CompressionSolver):
         pendings = []
         ctx = multiprocessing.get_context('spawn')
         with get_pool_executor(self.cfg.evaluate.num_workers, mp_context=ctx) as pool:
+            self.cfg.model_conditions.super_res.prob = self.sr_params.prob = 1
             for _, batch in enumerate(lp):
                 x = batch.to(self.device)
                 with torch.no_grad():

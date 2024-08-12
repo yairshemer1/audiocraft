@@ -87,7 +87,7 @@ class ComplexSuperResDenoiseCompressionSolver(CompressionSolver):
         T_new = x_downsampled.shape[-1]
         x_stft = torch.stft(x_downsampled.view(-1, T_new),
                             n_fft=self.preprocess_params.n_fft,
-                            hop_length=(self.preprocess_params.hop_length // 2) + 1,
+                            hop_length=self.preprocess_params.hop_length // 2,
                             win_length=self.preprocess_params.win_length,
                             normalized=self.preprocess_params.normalized,
                             return_complex=False)
