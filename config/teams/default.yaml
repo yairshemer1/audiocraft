@@ -10,3 +10,11 @@ darwin:  # if we detect we are on a Mac, then most likely we are doing unit test
     global: debug
     team: debug
   reference_dir: /cs/labs/adiyoss/yair.shemer/encodec-experiments/ref
+fair:
+  dora_dir: /checkpoint/${oc.env:USER}/experiments/audiocraft/outputs
+  partitions:
+    global: learnlab
+    team: learnlab
+  reference_dir: /large_experiments/audiocraft/reference
+  dataset_mappers:
+    "^/datasets01/datasets01": "/datasets01"
