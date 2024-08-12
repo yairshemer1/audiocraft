@@ -337,7 +337,8 @@ def pesq(y_pred: torch.Tensor, y: torch.Tensor, cfg: omegaconf.DictConfig):
     scores = []
     for ind in range(len(y)):
         try:
-            sample_score = pesq_func(fs=cfg.sample_rate, deg=y.squeeze().numpy()[ind], ref=y_pred.squeeze().numpy()[ind], mode="nb")
+            mode = "nb" if cfg.sample_rate == 8_000 else "wb"
+            sample_score = pesq_func(fs=cfg.sample_rate, deg=y.squeeze().numpy()[ind], ref=y_pred.squeeze().numpy()[ind], mode=mode)
             scores.append(sample_score)
         except:
             continue
