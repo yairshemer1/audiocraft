@@ -51,27 +51,37 @@ class ComplexSuperResDenoiseCompressionSolver(CompressionSolver):
         y_pred_lr, y_pred_sr = self.postprocess(x=qres.x, cond=cond)
 
         y_lr, y_sr = [], []
+        min_r_lr = float('inf')
+        min_r_sr = float('inf')
         for i, conds_knobs in enumerate(cond):
 
             if conds_knobs[self.SR_COND_COLUMN] == 1 and conds_knobs[self.DENOISE_COND_COLUMN] == 1:
                 # super resolution and denoising
                 y_sr.append(x_clean[i])
+                min_r_sr = min(x_clean[i].shape[-1], min_r_sr)
             elif conds_knobs[self.SR_COND_COLUMN] == 1 and conds_knobs[self.DENOISE_COND_COLUMN] == 0:
                 # super resolution only
                 y_sr.append(x_noisy[i])
+                min_r_sr = min(x_noisy[i].shape[-1], min_r_sr)
             elif conds_knobs[self.SR_COND_COLUMN] == 0 and conds_knobs[self.DENOISE_COND_COLUMN] == 1:
                 # denoising only
                 y_lr.append(x_clean_downsampled[i])
+                min_r_lr = min(x_clean_downsampled[i].shape[-1], min_r_lr)
             else:
                 # no super resolution and no denoising
                 y_lr.append(y_noisy_downsampled[i])
+                min_r_lr = min(y_noisy_downsampled[i].shape[-1], min_r_lr)
 
         if y_lr:
+            y_pred_lr = y_pred_lr[..., :min_r_lr]
+            y_lr = [tmp[..., :min_r_lr] for tmp in y_lr]
             y_lr = torch.stack(y_lr)
             y_lr = y_lr[..., :y_pred_lr.shape[-1]]  # trim to match y_pred
             assert y_lr.shape[-1] == y_pred_lr.shape[-1], "both y and y_pred should come out of same length"
 
         if y_sr:
+            y_pred_sr = y_pred_sr[..., :min_r_sr]
+            y_sr = [tmp[..., :min_r_sr] for tmp in y_sr]
             y_sr = torch.stack(y_sr)
             y_sr = y_sr[..., :y_pred_sr.shape[-1]]  # trim to match y_pred
             assert y_sr.shape[-1] == y_pred_sr.shape[-1], "both y and y_pred should come out of same length"
