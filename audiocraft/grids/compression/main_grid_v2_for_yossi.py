@@ -38,16 +38,16 @@ def explorer(launcher):
     })
 
     # encodec with 5 RVQs, add: rvq.n_q: 5
-    encodec_2_8kbs_model_dset_sr_name = [
-        ("encodec/encodec_large_nq4_s320", "audio/valentini_56spk", 16000, 'n_q=5: compress-encodec 16-16'),
-        ("encodec/encodec_large_nq4_s320", "audio/valentini_56spk", 8000, 'n_q=5: compress-encodec 8-8'),
-    ]
+    # encodec_2_8kbs_model_dset_sr_name = [
+    #     ("encodec/encodec_large_nq4_s320", "audio/valentini_56spk", 16000, 'n_q=5: compress-encodec 16-16'),
+    #     ("encodec/encodec_large_nq4_s320", "audio/valentini_56spk", 8000, 'n_q=5: compress-encodec 8-8'),
+    # ]
 
     # run our model - w.o quantization. add: encodec.quantizer: 'no_quant'
-    no_quant_model_dset_sr_name = [
-        ("encodec/complex/super_res_denoise", "audio/valentini_noisy_56spk", 16000, 'no_quant: compress-ours sr+denoise 8-16'),
-        ("encodec/complex_1d/1d_sr_denoise", "audio/valentini_noisy_56spk", 16000, 'no_quant: compress-1D-ours sr + denoise 8-16')
-    ]
+    # no_quant_model_dset_sr_name = [
+    #     ("encodec/complex/super_res_denoise", "audio/valentini_noisy_56spk", 16000, 'no_quant: compress-ours sr+denoise 8-16'),
+    #     ("encodec/complex_1d/1d_sr_denoise", "audio/valentini_noisy_56spk", 16000, 'no_quant: compress-1D-ours sr + denoise 8-16')
+    # ]
 
     # experiment with 256 codes and 4 cbs
     v1_model_dset_sr_name = [
