@@ -50,7 +50,7 @@ def explorer(launcher):
     ]
 
     # experiment with 256 codes and 4 cbs
-    v1_no_quant_model_dset_sr_name = [
+    v1_model_dset_sr_name = [
         # 2d
         ("encodec/complex/super_res_denoise", "audio/valentini_noisy_56spk", 16000, '256 codes, 4cbs - compress-ours sr+denoise 8-16'),
         ("encodec/complex/denoise", "audio/valentini_noisy_56spk", 16000, '256 codes, 4cbs - denoise-ours,single task 16-16'),
@@ -68,7 +68,7 @@ def explorer(launcher):
     ]
     
     # experiment with 2048 codes and 3 cbs
-    v2_no_quant_model_dset_sr_name = [
+    v2_model_dset_sr_name = [
         # 2d
         ("encodec/complex/super_res_denoise", "audio/valentini_noisy_56spk", 16000, '2048 codes, 3 cbs - compress-ours sr+denoise 8-16'),
         ("encodec/complex/denoise", "audio/valentini_noisy_56spk", 16000, '2048 codes, 3 cbs - denoise-ours,single task 16-16'),
@@ -86,7 +86,7 @@ def explorer(launcher):
     ]
 
     # experiment with 512 codes and 4 cbs
-    v3_no_quant_model_dset_sr_name = [
+    v3_model_dset_sr_name = [
         # 2d
         ("encodec/complex/super_res_denoise", "audio/valentini_noisy_56spk", 16000, '512 codes, 4cbs - compress-ours sr+denoise 8-16'),
         ("encodec/complex/denoise", "audio/valentini_noisy_56spk", 16000, '512 codes, 4cbs - denoise-ours,single task 16-16'),
@@ -128,36 +128,33 @@ def explorer(launcher):
             }
             launcher(args)
                 
-        for model, dset, sr, name in v1_no_quant_model_dset_sr_name:
+        for model, dset, sr, name in v1_model_dset_sr_name:
             args = {
                 "solver": 'compression/complex_reconstruct',
                 "model": model,
                 'dset': dset,
                 "sample_rate": sr,
-                "encodec.quantizer": 'no_quant',
                 'rvq.bins': 256,
                 'label': name
             }
             launcher(args)       
-        for model, dset, sr, name in v2_no_quant_model_dset_sr_name:
+        for model, dset, sr, name in v2_model_dset_sr_name:
             args = {
                 "solver": 'compression/complex_reconstruct',
                 "model": model,
                 'dset': dset,
                 "sample_rate": sr,
-                "encodec.quantizer": 'no_quant',
                 'rvq.bins': 2048,
                 'rvq.n_q': 3,
                 'label': name
             }
             launcher(args)     
-        for model, dset, sr, name in v3_no_quant_model_dset_sr_name:
+        for model, dset, sr, name in v3_model_dset_sr_name:
             args = {
                 "solver": 'compression/complex_reconstruct',
                 "model": model,
                 'dset': dset,
                 "sample_rate": sr,
-                "encodec.quantizer": 'no_quant',
                 'rvq.bins': 512,
                 'rvq.n_q': 4,
                 'label': name
