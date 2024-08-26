@@ -40,7 +40,7 @@ class EncoderLayer(torch.nn.Module):
         act = getattr(torch.nn, layer_kwargs.get('activation', 'ELU'))
         layers.append(act(**layer_kwargs.get('activation_params', {"alpha": 1.})))
         tmp = layer_kwargs.copy()
-        tmp['kernel_size'] = stride * 2
+        tmp['kernel_size'] = stride * 4
         layers.append(StreamableConv1d(ch_in, ch_out, stride=stride, **tmp))
         self.layers = torch.nn.Sequential(*layers)
         

@@ -21,7 +21,7 @@ model_conditions:
 model_config: # input would be 2, in_ch // 2, 64 <- should flatten in model
   in_channels: 1024
   out_channels: 1024
-  channels: [1024, 1024, 1024, 512]  # this also defines the num of layers & num vqs
+  channels: [256, 256, 256, 256]  # this also defines the num of layers & num vqs
   # channels: [1024, 1024, 512, 512]  # this also defines the num of layers & num vqs
   strides: [1, 1, 1, 1]  # w.r.t temporal axis
   lstm: 2
@@ -47,10 +47,10 @@ model_config: # input would be 2, in_ch // 2, 64 <- should flatten in model
     norm: weight_norm
     norm_params: {}
     kernel_size: 7
-    residual_kernel_size: 3
+    residual_kernel_size: 7
     last_kernel_size: 7
     dilation_base: 2
     pad_mode: constant
 
-  n_residual_encoder: 2
-  n_residual_decoder: 4
+  n_residual_encoder: 6
+  n_residual_decoder: 12

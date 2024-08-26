@@ -44,10 +44,11 @@ def explorer(launcher):
     for model in ['dn_comp', 'sr_dn_comp']:
         dset = 'audio/valentini_noisy_56spk' if 'dn' in model else 'audio/valentini_clean_56spk'
         for bins, vqs, channels in [
-            (2048, [1, 1, 1, 1], [1024, 1024, 1024, 512]),  # sanity for yair
-            (512, [1, 1, 1, 2], [1024, 1024, 1024, 512]),
-            (2048, [1, 1, 2], [1024, 1024, 1024]),
-            (512, [1, 2, 2], [1024, 1024, 1024]),
+            (2048, [1, 1, 1, 4], [256, 256, 256, 256]),  # sanity for yair 2
+            (2048, [1, 1, 1, 1], [256, 256, 256, 256]),  # sanity for yair
+            (512, [1, 1, 1, 2], [256, 256, 256, 256]),
+            (2048, [1, 1, 2], [256, 256, 256]),
+            (512, [1, 2, 2], [256, 256, 256]),
         ]:
             args = {
                 'dset': dset,

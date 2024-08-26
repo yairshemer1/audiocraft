@@ -49,5 +49,5 @@ model_config: # input would be 2, in_ch // 2, 64 <- should flatten in model
     dilation_base: 2
     pad_mode: constant
 
-  n_residual_encoder: 2
-  n_residual_decoder: 4
+  n_residual_encoder: 6
+  n_residual_decoder: 12
