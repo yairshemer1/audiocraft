@@ -97,6 +97,8 @@ def get_compression_model(cfg: omegaconf.DictConfig) -> CompressionModel:
         # deprecated params
         kwargs.pop('renorm', None)
         num_conditions = len(cfg.model_conditions) if hasattr(cfg, "model_conditions") else 0
+        
+        # TODO: add skip model, add num_conditions
         if is_complex:
             encodec_klass = ComplexEncodecModel
             kwargs['num_conditions'] = num_conditions
@@ -108,6 +110,9 @@ def get_compression_model(cfg: omegaconf.DictConfig) -> CompressionModel:
 
         return encodec_klass(encoder, decoder, quantizer,
                              frame_rate=frame_rate, renormalize=renormalize, **kwargs).to(cfg.device)
+    elif cfg.compression_model == 'skip_codec':
+        from .skip_codec import SkipCodec
+        return SkipCodec(cfg.model_config)
     else:
         raise KeyError(f"Unexpected compression model {cfg.compression_model}")
 

@@ -89,11 +89,11 @@ class ComplexSuperResDenoiseCompressionSolver(CompressionSolver):
         return y_lr, y_sr, y_pred_lr, y_pred_sr, qres
 
     def preprocess(self, x, is_gen_or_eval=False):
-        x = F.pad(x, (0, 1), "constant", 0)  # pad samples for stft
+        # x = F.pad(x, (0, 1), "constant", 0)  # pad samples for stft
         B, C, T_orig = x.shape
 
         x_downsampled = julius.resample_frac(x, self.sr_params.origin_sr, self.sr_params.target_sr)
-        x_downsampled = F.pad(x_downsampled, (0, 1), "constant", 0)  # pad samples for stft
+        # x_downsampled = F.pad(x_downsampled, (0, 1), "constant", 0)  # pad samples for stft
         T_new = x_downsampled.shape[-1]
         x_stft = torch.stft(x_downsampled.view(-1, T_new),
                             n_fft=self.preprocess_params.n_fft,

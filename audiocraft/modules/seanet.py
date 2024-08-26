@@ -33,7 +33,7 @@ class SEANetResnetBlock(nn.Module):
     def __init__(self, dim: int, kernel_sizes: tp.List[int] = [3, 1], dilations: tp.List[int] = [1, 1],
                  activation: str = 'ELU', activation_params: dict = {'alpha': 1.0},
                  norm: str = 'none', norm_params: tp.Dict[str, tp.Any] = {}, causal: bool = False,
-                 pad_mode: str = 'reflect', compress: int = 2, true_skip: bool = True):
+                 pad_mode: str = 'reflect', compress: int = 2, true_skip: bool = True, **kwargs):
         super().__init__()
         assert len(kernel_sizes) == len(dilations), 'Number of kernel sizes should match number of dilations'
         act = getattr(nn, activation)
