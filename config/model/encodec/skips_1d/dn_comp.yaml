@@ -1,0 +1,51 @@
+# @package __global__
+
+data_preprocess:
+  n_fft: 1023
+  hop_length: 250 # n_fft // 4
+  win_length: 1023 # n_fft
+  normalized: false
+
+compression_model: skip_codec
+
+solver: complex_denoise_compression
+
+model_conditions:
+  denoise:
+    prob: 0.5
+
+model_config: # input would be 2, in_ch // 2, 64 <- should flatten in model
+  in_channels: 1024
+  out_channels: 1024
+  channels: [1024, 512, 256, 128]  # this also defines the num of layers & num vqs
+  strides: [1, 1, 1, 1]  # w.r.t temporal axis
+  lstm: 2
+  model_conditions: ${model_conditions}
+
+
+  vqs:
+    n_qs: [1, 1, 1, 1]
+    additional_kwargs:
+      bins: 2048  # should be fixed, num vectors in each codebook
+      q_dropout: false
+      decay: 0.99
+      kmeans_init: true
+      kmeans_iters: 50
+      threshold_ema_dead_code: 2
+      orthogonal_reg_weight: 0.0
+      orthogonal_reg_active_codes_only: false
+
+  layer_kwargs:
+    causal: false
+    activation: ELU
+    activation_params: {"alpha": 1.}
+    norm: weight_norm
+    norm_params: {}
+    kernel_size: 7
+    residual_kernel_size: 3
+    last_kernel_size: 7
+    dilation_base: 2
+    pad_mode: constant
+
+  n_residual_encoder: 2
+  n_residual_decoder: 4
