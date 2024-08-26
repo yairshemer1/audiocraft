@@ -7,6 +7,9 @@ from audiocraft.quantization.vq import ResidualVectorQuantizer
 from ..utils.utils import dict_from_config
 from ..modules.conv import StreamableConv1d, StreamableConvTranspose1d
 from ..modules.seanet import SEANetResnetBlock
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class MergeModule(torch.nn.Module):
@@ -18,6 +21,12 @@ class MergeModule(torch.nn.Module):
     def forward(self, x, skip):
         x = torch.concat([x.permute(0, 2, 1), skip.permute(0, 2, 1)], dim=-1)
         return self.proj(x).permute(0, 2, 1)
+
+
+class DummyModule(torch.nn.Module):
+    
+    def forward(self, x, *args, **kwargs):
+        return x
 
 class EncoderLayer(torch.nn.Module):
     
@@ -33,6 +42,8 @@ class EncoderLayer(torch.nn.Module):
         self.stride = stride
         layers = []
         
+        self.linear_in = torch.nn.Linear(ch_in, ch_in)
+        
         for _ in range(n_residuals):
             layers.append(SEANetResnetBlock(ch_in, **layer_kwargs))
 
@@ -45,6 +56,7 @@ class EncoderLayer(torch.nn.Module):
         self.layers = torch.nn.Sequential(*layers)
         
     def forward(self, x):
+        x = self.linear_in(x.permute(0, 2, 1)).permute(0, 2, 1)
         return self.layers(x)
     
         
@@ -54,6 +66,7 @@ class DecoderLayer(torch.nn.Module):
                  ch_in: int,
                  ch_out: int,
                  stride: int = 1,
+                 film_conds: int = 0,
                  **layer_kwargs):
         super().__init__()
         self.n_residuals = n_residuals
@@ -61,11 +74,14 @@ class DecoderLayer(torch.nn.Module):
         self.ch_out = ch_out
         self.stride = stride
         layers = []
-        
+        self.linear_in = torch.nn.Linear(ch_in, ch_in)
         act = getattr(torch.nn, layer_kwargs.get('activation', 'ELU'))
         layers.append(act(**layer_kwargs.get('activation_params', {"alpha": 1.})))
         tmp = layer_kwargs.copy()
         tmp['kernel_size'] = stride * 2
+        self.film_conds = film_conds
+        self.film = FiLM(dim=ch_in, dim_cond=film_conds) if film_conds > 0 else DummyModule()
+        
         layers.append(StreamableConvTranspose1d(ch_in, ch_out, stride=stride, **tmp))
         
         for _ in range(n_residuals):
@@ -75,14 +91,28 @@ class DecoderLayer(torch.nn.Module):
         
         self.layers = torch.nn.Sequential(*layers)
         
-    def forward(self, x):
+    def forward(self, x, cond: torch.Tensor = None):
+        x = self.linear_in(x.permute(0, 2, 1)).permute(0, 2, 1)
+        x = self.film(x, cond)
+        if self.film_conds > 0:
+            return self.layers(x)
         return self.layers(x)
 
 
-class DummyModule(torch.nn.Module):
-    
-    def forward(self, x, *args, **kwargs):
-        return x
+def print_module_params(modules, name):
+    total_params = 0
+    for module in modules:
+        num_params = sum(p.numel() for p in module.parameters())
+        total_params += num_params
+    if total_params >= 1e9:
+        total_params_str = f"{total_params/1e9:.2f} B"
+    elif total_params >= 1e6:
+        total_params_str = f"{total_params/1e6:.2f} M"
+    elif total_params >= 1e3:
+        total_params_str = f"{total_params/1e3:.2f} K"
+    else:
+        total_params_str = str(total_params)
+    logger.info(f"Total number of parameters in {name}: {total_params_str}")
 
 
 class SkipCodec(torch.nn.Module):
@@ -112,9 +142,14 @@ class SkipCodec(torch.nn.Module):
                                                           **dict_from_config(cfg.vqs.additional_kwargs)))
 
         # build dec layers
+        if cfg.get('include_film_in_decoder_layers', False):
+            self.film_conds = len(cfg.model_conditions)
+        else:
+            self.film_conds = 0
         for i, (s, (ch_out, ch_in)) in enumerate(zip(cfg.strides, channels_out)):
             self.decoder_layers.append(DecoderLayer(n_residuals=cfg.n_residual_decoder,
                                                     ch_in=ch_in, ch_out=ch_out, stride=s,
+                                                    film_conds=self.film_conds,
                                                     **dict_from_config(cfg.layer_kwargs)))
             if i == 0:
                 self.merge_layers.append(DummyModule())
@@ -125,6 +160,8 @@ class SkipCodec(torch.nn.Module):
         self.film = FiLM(dim=cfg.channels[-1], dim_cond=len(cfg.model_conditions))
         self.lstm_enc = StreamableLSTM(cfg.channels[-1], num_layers=cfg.lstm)
         self.lstm_dec = StreamableLSTM(cfg.channels[-1], num_layers=cfg.lstm)
+        print_module_params(self.encoder_layers, 'encoder_layers')
+        print_module_params(self.decoder_layers, 'decoder_layers')
 
 
     def encode(self, x):
@@ -139,13 +176,15 @@ class SkipCodec(torch.nn.Module):
             x = x.x
         return x, q_results
 
-    def decode(self, x, q_results):
+    def decode(self, x: torch.Tensor,
+               q_results: torch.Tensor,
+               cond: torch.Tensor = None):
         x = self.lstm_dec(x)
         skips = [q.x for q in q_results]
         for merge, layer in zip(self.merge_layers, self.decoder_layers):
             skip = skips.pop()
             x = merge(x, skip)
-            x = layer(x)
+            x = layer(x, cond)
         return x
 
     def forward(self, x: torch.Tensor,
@@ -160,9 +199,9 @@ class SkipCodec(torch.nn.Module):
         
         # apply film
         x = self.film(x, cond=condition)
-        
+        cond = condition if self.film_conds > 0 else None
         # pass through decoder
-        x = self.decode(x, q_results)
+        x = self.decode(x, q_results, cond)
         x = x.reshape(B, -1, F, T)
         
         # accumulate losses and kbs

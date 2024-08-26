@@ -21,7 +21,7 @@ model_conditions:
 model_config: # input would be 2, in_ch // 2, 64 <- should flatten in model
   in_channels: 1024
   out_channels: 1024
-  channels: [256, 256, 256, 256]  # this also defines the num of layers & num vqs
+  channels: [1024, 512, 256, 256]  # this also defines the num of layers & num vqs
   # channels: [1024, 1024, 512, 512]  # this also defines the num of layers & num vqs
   strides: [1, 1, 1, 1]  # w.r.t temporal axis
   lstm: 2
